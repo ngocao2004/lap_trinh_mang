@@ -64,9 +64,6 @@ Node* createNode(char* userName, char *password, int score) {
 Node* insert(Node* r, char* userName, char* password, int score) {
     if (r == NULL){ 
         Node* newNode = createNode(userName, password, score);
-        FILE* file = fopen("account.txt", "a");
-        fprintf(file, "%s %s %d\n", userName, password, score);
-        fclose(file);
         return newNode;
     }
     int cmp = strcmp(r->account.userName, userName);

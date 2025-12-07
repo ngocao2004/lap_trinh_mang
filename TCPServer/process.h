@@ -176,6 +176,10 @@ int signUp(char *username, char *password, Session *currentSession) {
     }
 
     root = insert(root, username, password, 100); // Default status is active
+    FILE* file = fopen("account.txt", "a");
+    fprintf(file, "%s %s %d\n", username, password, 100);
+    fclose(file);
+
     bytes_sent = send(currentSession->socket, "110\r\n", strlen("110\r\n"), 0);
     res = 110;
 
