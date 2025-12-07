@@ -91,7 +91,8 @@ int sendMessage(int socketFd, char buffer[], const char *input, int type) {
 int receiveResult(int serverSock, char *buffer, size_t size) {
     memset(buffer, 0, size);
     char *delimiter;
-    while (delimiter = strstr(buffer, "\r\n") == NULL) {
+    while ((delimiter = strstr(buffer, "\r\n")) == NULL) {
+
         ssize_t bytes = recv(serverSock, buffer, size - 1, 0);
         if (bytes < 0) {
             perror("recv() error");
