@@ -32,50 +32,30 @@ char buffer[BUFF_SIZE];
  * @return Number of bytes sent on success, -1 on error.
  */
 int sendMessage(int socketFd, char buffer[], const char *input, int type) {
-    ssize_t bytes_sent;
-
     const char *prefix_str = commandPrefix[type];
-    size_t prefix_len = strlen(prefix_str);
+    const char *end_marker = "\r\n";
 
-   
-    bytes_sent = send(socketFd, prefix_str, prefix_len, 0);
-    if (bytes_sent < 0) {
-        perror("send() commandPrefix error");
+
+    if (send(socketFd, prefix_str, strlen(prefix_str), 0) < 0) {
+        perror("send() prefix error");
         return -1;
     }
 
-    
-    size_t input_len = strlen(input);
-    size_t sent_input = 0;
-
-    while (sent_input < input_len) {
-        size_t chunk_size = (input_len - sent_input > BUFF_SIZE)
-                            ? BUFF_SIZE
-                            : (input_len - sent_input);
-
-        memcpy(buffer, input + sent_input, chunk_size);
-
-        bytes_sent = send(socketFd, buffer, chunk_size, 0);
-        if (bytes_sent < 0) {
-            if (errno == EINTR) continue;
-            perror("send() input error");
-            return -1;
-        }
-
-        sent_input += bytes_sent;
+  
+    if (send(socketFd, input, strlen(input), 0) < 0) {
+        perror("send() input error");
+        return -1;
     }
 
-  
-    const char *end_marker = "\r\n";
-    bytes_sent = send(socketFd, end_marker, 2, 0);
-    if (bytes_sent < 0) {
+
+    if (send(socketFd, end_marker, 2, 0) < 0) {
         perror("send() CRLF error");
         return -1;
     }
 
-    
-    return prefix_len + sent_input;
+    return strlen(prefix_str) + strlen(input);
 }
+
 
 
 
