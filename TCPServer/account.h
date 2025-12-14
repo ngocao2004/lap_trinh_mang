@@ -10,6 +10,8 @@ typedef struct Account {
     int score;
     bool isLoggedIn; 
     bool isWaiting;
+    struct Account* challengedBy;   
+    struct Account* challenging; 
 } Account;
 
 
@@ -98,6 +100,40 @@ Node* find(Node* r, char* userName) {
     else if (cmp < 0) return find(r->right, userName);
     return find(r->left, userName);
 }
+
+
+int collectReadyUsers(Node* root,
+                      char* buffer,
+                      size_t bufferSize,
+                      Account* currentAccount)
+{
+    if (root == NULL) return 0;
+
+    int count = 0;
+
+    count += collectReadyUsers(root->left, buffer, bufferSize, currentAccount);
+
+    if (strcmp(root->account.userName,currentAccount->userName) != 0 &&
+        root->account.isLoggedIn &&
+        !root->account.isWaiting)
+    {
+        size_t len = strlen(buffer);
+        if (len < bufferSize - 3) {
+            snprintf(buffer + len,
+                    bufferSize - len,
+                    "%s\r\n",
+                    root->account.userName);
+            count++;
+        }
+    }
+
+
+    count += collectReadyUsers(root->right, buffer, bufferSize, currentAccount);
+
+    return count;
+}
+
+
 
 
 /**

@@ -37,11 +37,19 @@ int main(int argc, char** argv) {
     struct sockaddr_in server_addr; /* server's address information */
     struct sockaddr_in client_addr; /* client's address information */
     pthread_t tid;
-    int sin_size;
+    socklen_t sin_size;
 
     if ((listen_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("socket() error: ");
         exit(EXIT_FAILURE);
+    }
+
+    // Allow address reuse
+    int opt = 1;
+    if (setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("setsockopt() failed");
+        close(listen_sock);
+        return EXIT_FAILURE;
     }
 
     memset(&server_addr, 0, sizeof(server_addr));
