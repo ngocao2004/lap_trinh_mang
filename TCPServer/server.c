@@ -78,6 +78,7 @@ int main(int argc, char** argv) {
         args->socket = conn_sock;
         args->client_addr = client_addr;
         args->currentAccount = NULL;
+
         printf("New connection from %s:%d\n", inet_ntoa(args->client_addr.sin_addr), ntohs(args->client_addr.sin_port));
         send(args->socket, "100\r\n", strlen("100\r\n"), 0);
         pthread_create(&tid, NULL, receive_request, args);

@@ -1,15 +1,24 @@
+#ifndef ACCOUNT_H
+#define ACCOUNT_H
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <pthread.h>
 
+enum Status {
+    ONLINE,
+    MATCHING,
+    IN_GAME, 
+    OFFLINE
+};
 typedef struct Account {
-    char userName[10000];
-    char password[10000];
+    char userName[30];
+    char password[30];
     int score;
-    bool isLoggedIn; 
-    bool isWaiting;
+    enum Status status;
 } Account;
 
 
@@ -22,12 +31,13 @@ typedef struct Node {
     struct Node* right;     
 } Node;
 
-struct {
+typedef struct MutexVar {
     pthread_mutex_t lock;
     pthread_cond_t cond;
     bool ready;
-} mutexVar = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, true};
+} MutexVar;
 
+MutexVar mutexVar = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, true};
 Node *root;
 
 
@@ -44,6 +54,7 @@ Node* createNode(char* userName, char *password, int score) {
     strcpy(newNode->account.userName, userName);
     strcpy(newNode->account.password, password);
     newNode->account.score = score;
+    newNode->account.status = OFFLINE;
     newNode->left = NULL;
     newNode->right = NULL;   
     return newNode;
@@ -113,8 +124,8 @@ int initList() {
     }
     root = NULL;
     while (!feof(file)) {
-        char name[10000]; 
-        char password[10000];
+        char name[30]; 
+        char password[30];
         int score;
         fscanf(file, "%s %s %d", name, password, &score);
         root = insert(root, name, password, score);         
@@ -122,6 +133,34 @@ int initList() {
     printf("Done!");
     fclose(file);
     return 0;
+}
+
+
+
+int collectReadyUsers(Node* root,
+                      char list [][40],
+                      int index,
+                      Account* currentAccount)
+{
+    if (root == NULL || index >= 4096) return 0;
+
+    int count = 0;
+
+    if (root->account.status == ONLINE &&
+        strcmp(root->account.userName, currentAccount->userName) != 0) {
+        strcpy(list[index], root->account.userName);
+        strcat(list[index], " ");
+        char scoreStr[10];
+        snprintf(scoreStr, sizeof(scoreStr), "%d", root->account.score);
+        strcat(list[index], scoreStr);
+        index++;
+        count++;
+    }
+
+    count += collectReadyUsers(root->left, list, index, currentAccount);
+    count += collectReadyUsers(root->right, list, index, currentAccount);
+
+    return count;
 }
 
 

@@ -4,6 +4,10 @@
 extern bool quitFlag;
 extern char buffer[];
 struct in_addr ipv4addr;
+pthread_mutex_t menuMutex;
+pthread_cond_t menuCond;
+int lastResponse;
+
 int main(int argc, char** argv) {
     char *temp = malloc(sizeof(argv[1]) * strlen(argv[1]));
 	strcpy(temp, argv[1]);
@@ -64,9 +68,28 @@ int main(int argc, char** argv) {
 		printf("Failed to connect to server. Server response: %s\n", buffer);
 		return 1;
 	}
-    while (quitFlag == false) {
-        showMenu(client_sock);
-    }
+	// start background listener thread to receive unsolicited server messages
+	pthread_t recv_tid;
+	int *psock = malloc(sizeof(int));
+	*psock = client_sock;
+	if (pthread_create(&recv_tid, NULL, recv_server, psock) != 0) {
+		perror("pthread_create() failed");
+		free(psock);
+	} else {
+		pthread_detach(recv_tid);
+	}
+    while (!quitFlag) {
+			switch (menu)
+			{
+			case MAIN:
+				showMenu(client_sock);
+				break;
+			
+			default:
+				break;
+			} 
+		
+	}
     close(client_sock);
     return 0;
 }
