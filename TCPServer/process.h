@@ -1,7 +1,10 @@
-#include "account.h"
+
+#ifndef PROCESS_H
+#define PROCESS_H
+
+#include "session.h"
 #include <time.h>
 #include <stdbool.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <signal.h>
@@ -11,6 +14,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <pthread.h>
+#include "match.h"
+
 
 #define BUFF_SIZE 4096
 #define MAXLEN 10000
@@ -18,22 +23,16 @@
 #define CODE_LEN 3
 
 
-typedef struct Session {
-    int socket;
-    struct sockaddr_in client_addr;
-    Account* currentAccount;
-    char userName[100];
-} Session;
-
-#define MAX_SESSIONS 100
-Session* sessionTable[MAX_SESSIONS];
-int sessionCount = 0;
-pthread_mutex_t sessionTableMutex = PTHREAD_MUTEX_INITIALIZER;
 
 extern Node* root;
+extern MutexVar mutexVar;
+extern Session *sessionTable[MAX_SESSIONS];
+
 const char* prefix[5] = {"REGISTER ","LOGOUT", "LOGIN ","GET_READY_LIST","CHALLENGE "
                         };
 
+
+                    
 
 void putLog(int result, char input[], struct sockaddr_in client_addr) {
     time_t now = time(NULL);
@@ -46,75 +45,35 @@ void putLog(int result, char input[], struct sockaddr_in client_addr) {
     printf("%s $ %s:%d $ %s $ %d\n", buffer, client_ip, client_port, input, result);
 }
 
+int sendMessage(int sockfd, const char *message)
+{
+    size_t total = strlen(message);
+    size_t sent = 0;
 
-bool addSessionToTable(Session* session) {
+    while (sent < total) {
+        ssize_t n = send(sockfd,
+                         message + sent,
+                         total - sent,
+                         0);
 
-    pthread_mutex_lock(&sessionTableMutex);
-    if (sessionCount >= MAX_SESSIONS) {
-        pthread_mutex_unlock(&sessionTableMutex);
-        return false; 
-    }
-    sessionTable[sessionCount++] = session;
-    pthread_mutex_unlock(&sessionTableMutex);
-    return true;
-}
+        if (n < 0) {
+            if (errno == EINTR)
+                continue; 
 
-bool removeSessionFromTable(Session* session) {
-    pthread_mutex_lock(&sessionTableMutex);
-    int found = -1;
-    for (int i = 0; i < sessionCount; i++) {
-        if (sessionTable[i] == session) {
-            found = i;
-            break;
+            perror("send");
+            return -1;
         }
-    }
-    if (found == -1) {
-        pthread_mutex_unlock(&sessionTableMutex);
-        return false; // not found
-    }
-    // Shift remaining sessions
-    for (int i = found; i < sessionCount - 1; i++) {
-        sessionTable[i] = sessionTable[i + 1];
-    }
-    sessionTable[sessionCount - 1] = NULL;
-    sessionCount--;
-    pthread_mutex_unlock(&sessionTableMutex);
 
-    return true;
-}
-
-int getSocketByUsername(const char* username) {
-    int sock = -1;
-    pthread_mutex_lock(&sessionTableMutex);
-    for (int i = 0; i < sessionCount; i++) {
-        if (strcmp(sessionTable[i]->userName, username) == 0) {
-            sock = sessionTable[i]->socket;
-            break;
+        if (n == 0) {
+          
+            return -1;
         }
+
+        sent += n;
     }
-    pthread_mutex_unlock(&sessionTableMutex);
-    return sock;
+
+    return (int)sent;
 }
-
-bool sendChallengeNotification(const char* opponent, const char* fromUser) {
-    int sock = getSocketByUsername(opponent);
-    if (sock == -1) {
-        printf("[sendChallengeNotification] opponent '%s' not found in sessionTable\n", opponent);
-        return false;
-    }
-
-    char msg[256];
-    snprintf(msg, sizeof(msg), "140 %s\r\n", fromUser);
-    ssize_t sent = send(sock, msg, strlen(msg), 0);
-    if (sent < 0) {
-        perror("send() error in sendChallengeNotification");
-        return false;
-    }
-    printf("[sendChallengeNotification] forwarded challenge from '%s' to '%s' (sock=%d), bytes=%zd\n", fromUser, opponent, sock, sent);
-    return true;
-}
-
-
 
 /**
  * @brief Log in to an account by username.
@@ -126,12 +85,13 @@ bool sendChallengeNotification(const char* opponent, const char* fromUser) {
  */
 int logIn(char *username, char *password, Session* currentSession) {
     int bytes_sent;
+    int counter = 0;
     if (currentSession->currentAccount != NULL) {
-        bytes_sent = send(currentSession->socket, "213\r\n", strlen("213\r\n"), 0);
+        bytes_sent = sendMessage(currentSession->socket, "213\r\n");
         if (bytes_sent < 0) {
-            perror("send() error: ");
-            return -1;
-        }
+                    perror("send() error: ");
+                    return -1;
+                }
         return 213;
     }
     
@@ -148,26 +108,22 @@ int logIn(char *username, char *password, Session* currentSession) {
 
     if (result != NULL) {
           
-            if(result->account.isLoggedIn == false){
+            if(result->account.status == OFFLINE){
                 if(strcmp(result->account.password, password) == 0){
-                    result->account.isLoggedIn = true;
+                    result->account.status = ONLINE;
                     currentSession->currentAccount = &result->account;
-                    // store username in session and add to session table
-                    strncpy(currentSession->userName, username, sizeof(currentSession->userName) - 1);
-                    currentSession->userName[sizeof(currentSession->userName) - 1] = '\0';
-                    addSessionToTable(currentSession);
-                    bytes_sent = send(currentSession->socket, "111\r\n", strlen("111\r\n"), 0);
+                    bytes_sent = sendMessage(currentSession->socket, "111\r\n");
                     res = 111;
-
+    
                 }
                 else{      
-                    bytes_sent = send(currentSession->socket, "215\r\n", strlen("215\r\n"), 0);
+                    bytes_sent = sendMessage(currentSession->socket, "215\r\n");
                     res = 215;
     
                 }
             }
             else {
-                bytes_sent = send(currentSession->socket, "213\r\n", strlen("213\r\n"), 0);
+                bytes_sent = sendMessage(currentSession->socket, "213\r\n");
                 res = 213;
             }
 
@@ -175,17 +131,16 @@ int logIn(char *username, char *password, Session* currentSession) {
         
     }
     else{
-        bytes_sent = send(currentSession->socket, "215\r\n", strlen("215\r\n"), 0);
-                
+        bytes_sent = sendMessage(currentSession->socket, "215\r\n");
         res = 215;
     }
     mutexVar.ready = true;
     pthread_cond_signal(&mutexVar.cond);
     pthread_mutex_unlock(&mutexVar.lock);
-    if (bytes_sent < 0) {
-                    perror("send() error: ");
-                    res = -1;
-                }
+    if (bytes_sent <= 0) {
+        perror("send() error: ");
+        res = -1;
+    }
     
     
     return res;
@@ -202,8 +157,8 @@ int logIn(char *username, char *password, Session* currentSession) {
 int logOut(Session* currentSession) {
     int bytes_sent;
     if (currentSession->currentAccount == NULL) {
-        bytes_sent = send(currentSession->socket, "221\r\n", strlen("221\r\n"), 0);
-            if (bytes_sent < 0) {
+        bytes_sent = sendMessage(currentSession->socket, "221\r\n");
+            if (bytes_sent <= 0) {
                 perror("send() error: ");
                 return -1;
             }
@@ -215,17 +170,15 @@ int logOut(Session* currentSession) {
     }
     mutexVar.ready = false;
 
-    currentSession->currentAccount->isLoggedIn = false;
-    // remove from session table when logging out
-    removeSessionFromTable(currentSession);
+    currentSession->currentAccount->status = OFFLINE;
     currentSession->currentAccount = NULL;
     mutexVar.ready = true;
     pthread_cond_signal(&mutexVar.cond);
     pthread_mutex_unlock(&mutexVar.lock);
 
 
-    bytes_sent = send(currentSession->socket, "112\r\n", strlen("112\r\n"), 0);
-            if (bytes_sent < 0) {
+    bytes_sent = sendMessage(currentSession->socket, "112\r\n");
+            if (bytes_sent <= 0) {
                 perror("send() error: ");
                 return -1;
             }
@@ -237,8 +190,8 @@ int logOut(Session* currentSession) {
 int signUp(char *username, char *password, Session *currentSession) {
     int bytes_sent, res;
     if (currentSession->currentAccount != NULL) {
-        bytes_sent = send(currentSession->socket, "213\r\n", strlen("213\r\n"), 0);
-        if (bytes_sent < 0) {
+        bytes_sent = sendMessage(currentSession->socket, "213\r\n");
+        if (bytes_sent <= 0) {
             perror("send() error: ");
             return -1;
         }
@@ -258,193 +211,232 @@ int signUp(char *username, char *password, Session *currentSession) {
     }
 
     root = insert(root, username, password, 100); // Default status is active
-    bytes_sent = send(currentSession->socket, "110\r\n", strlen("110\r\n"), 0);
+    FILE* file = fopen("account.txt", "a");
+    fprintf(file, "%s %s %d\n", username, password, 100);
+    fclose(file);
+
+    bytes_sent = sendMessage(currentSession->socket, "110\r\n");
     res = 110;
 
     mutexVar.ready = true;
     pthread_cond_signal(&mutexVar.cond);
     pthread_mutex_unlock(&mutexVar.lock);
-    if (bytes_sent < 0) {
+    if (bytes_sent <= 0) {
         perror("send() error: ");
         res = -1;
     }
     return res;
 }
 
-
 int getReadyList(Session* currentSession)
 {
     if (!currentSession->currentAccount) {
-        send(currentSession->socket, "214\r\n", 5, 0);
+        sendMessage(currentSession->socket, "214\r\n");
+        return 214;
+    }
+
+    char list[4096][40];
+    while (mutexVar.ready == false) {
+        pthread_cond_wait(&mutexVar.cond, &mutexVar.lock);
+    }
+    int count = collectReadyUsers(root, list, 0, currentSession->currentAccount);
+    char response[BUFF_SIZE*41 + strlen("120 \r\n")];
+    snprintf(response, sizeof(response), "120 %d\r\n", count);
+    for (int i = 0; i < count; i++) {
+        strcat(response, list[i]);
+        if (i < count - 1) {
+            strcat(response, "\n");
+        }
+    }
+    strcat(response, "\r\n");
+    sendMessage(currentSession->socket, response);
+    return 120;
+}
+
+int handleChallenge(Session* currentSession, char opponentName[]) {
+    if (!currentSession->currentAccount) {
+        sendMessage(currentSession->socket, "214\r\n");
         return 214;
     }
 
     pthread_mutex_lock(&mutexVar.lock);
-
-    char listBuffer[4096] = {0};
-    int count = collectReadyUsers(root,
-                                  listBuffer,
-                                  sizeof(listBuffer),
-                                  currentSession->currentAccount);
-
-    pthread_mutex_unlock(&mutexVar.lock);
-
-    char response[4096+100];
-    int headerLen = snprintf(response, sizeof(response), "120 %d\r\n", count);
-
-    if (headerLen < 0 || headerLen >= sizeof(response)) {
-        send(currentSession->socket, "500 Internal error\r\n", 20, 0);
-        return 500;
+    while (mutexVar.ready == false) {
+        pthread_cond_wait(&mutexVar.cond, &mutexVar.lock);
     }
+    mutexVar.ready = false;
+    int res = -1;
 
-    size_t totalLen = headerLen;
+    // Send challenge request to opponent
+    printf("Challenging %s\n", opponentName);
+    int opp = getSessionByUsername(opponentName);
+    if (opp < 0) {
+        sendMessage(currentSession->socket, "230\r\n");
+        res = 230;
+    }
+    else {
+        printf("HI");
+        Session *opponentSession = sessionTable[opp];
+        if (opponentSession->currentAccount == NULL || opponentSession->currentAccount->status == OFFLINE) {
+            sendMessage(currentSession->socket, "230\r\n");
+            res = 230;
+        }
 
-    if (count > 0) {
-        int n = snprintf(response + headerLen, 
-                         sizeof(response) - headerLen,
-                         "%s", 
-                         listBuffer);
+        else if (opponentSession->currentAccount->status != ONLINE) {
+            sendMessage(currentSession->socket, "231\r\n");
+            res = 231;
+        }
+
+        else if(abs(currentSession->currentAccount->score - opponentSession->currentAccount->score) > 10) {
+            sendMessage(currentSession->socket, "232\r\n");
+            res = 232;
+        }
         
-        if (n > 0 && n < (int)(sizeof(response) - headerLen)) {
-            totalLen += n;
-        } else {
-            printf("Warning: Response truncated\n");
-            totalLen = sizeof(response) - 1;
-            response[totalLen] = '\0';
+        else {
+            currentSession->currentAccount->status = MATCHING;
+            char challengeMsg[BUFF_SIZE];
+            snprintf(challengeMsg, sizeof(challengeMsg), "CHALLENGE %s\r\n", currentSession->currentAccount->userName);
+            sendMessage(opponentSession->socket, challengeMsg);
+            sendMessage(currentSession->socket, "130\r\n");
+            currentSession->opponentAccount = *(opponentSession->currentAccount);
+            res = 130;
         }
     }
-
-    ssize_t sent = send(currentSession->socket, response, totalLen, 0);
-    
-    if (sent < 0) {
-        perror("send failed");
-        return -1;
-    } else if (sent < (ssize_t)totalLen) {
-        printf("Warning: Only sent %zd/%zu bytes\n", sent, totalLen);
-    }
-
-    return 120;
-}
-
-
-
-int handleChallenge(Session* currentSession, char* opponentName) {
-    if (!currentSession->currentAccount || !currentSession->currentAccount->isLoggedIn) {
-        send(currentSession->socket, "214\r\n", 5, 0);
-        return 214; 
-    }
-    if (strcmp(currentSession->currentAccount->userName, opponentName) == 0) {
-        send(currentSession->socket, "231\r\n", 5, 0); 
-        return 231;
-    }
-
-    pthread_mutex_lock(&mutexVar.lock);
-
-    Node* targetNode = find(root, opponentName);
-    if (!targetNode || !targetNode->account.isLoggedIn) {
-        pthread_mutex_unlock(&mutexVar.lock);
-        send(currentSession->socket, "230\r\n", 5, 0);
-        return 230;
-    }
-
-    if (targetNode->account.isWaiting) {
-        pthread_mutex_unlock(&mutexVar.lock);
-        send(currentSession->socket, "231\r\n", 5, 0);
-        return 231;
-    }
-
-    if (abs(currentSession->currentAccount->score - targetNode->account.score) > 10) {
-        pthread_mutex_unlock(&mutexVar.lock);
-        send(currentSession->socket, "232\r\n", 5, 0);
-        return 232;
-    }
-
-    targetNode->account.isWaiting = true;
-    targetNode->account.challengedBy = currentSession->currentAccount;
-    currentSession->currentAccount->challenging = &targetNode->account;
-
+    mutexVar.ready = true;
+    pthread_cond_signal(&mutexVar.cond);
     pthread_mutex_unlock(&mutexVar.lock);
-
-    send(currentSession->socket, "130\r\n", 5, 0);
-    sendChallengeNotification(opponentName,
-                            currentSession->currentAccount->userName);
-
-    return 130;
-
+    return res;
 }
 
-
-void handle_challenge_resp(Session* session, char* message) {
-    char cmd[32], opponentName[32], action[16];
-
-    int count = sscanf(message, "%s %s %s", cmd, opponentName, action);
-    if (count != 3 || strcmp(cmd, "CHALLENGE_RESP") != 0) {
-        send(session->socket, "300\r\n", 5, 0);
-        return;
+int handleChallengeResp(Session* currentSession, const char response[], const char challenger[]) {
+    if (!currentSession->currentAccount) {
+        sendMessage(currentSession->socket, "214\r\n"); // Not logged in
+        return 214;
     }
 
-    Account *me = session->currentAccount;
-    if (!me || !me->isLoggedIn) {
-        send(session->socket, "214\r\n", 5, 0);
-        return;
-    }
+    int res = -1;
 
-    pthread_mutex_lock(&mutexVar.lock);
-
-    Node *oppNode = find(root, opponentName);
-    if (!oppNode) {
+    pthread_mutex_lock(&mutexVar.lock); 
+    int oppIndex = getSessionByUsername(challenger);
+    if (oppIndex < 0) {
+        sendMessage(currentSession->socket, "230\r\n"); // Opponent not found
+        res = 230;
         pthread_mutex_unlock(&mutexVar.lock);
-        send(session->socket, "233\r\n", 5, 0);
-        return;
+        return res;
     }
 
-    Account *opp = &oppNode->account;
+    Session* opponentSession = sessionTable[oppIndex];
 
-    if (me->challengedBy != opp) {
+    if (!opponentSession->currentAccount || opponentSession->currentAccount->status == OFFLINE) {
+        sendMessage(currentSession->socket, "230\r\n"); // Opponent offline
+        res = 230;
         pthread_mutex_unlock(&mutexVar.lock);
-        send(session->socket, "233\r\n", 5, 0);
-        return;
+        return res;
+    }
+    if (opponentSession->currentAccount->status == IN_GAME) {
+        sendMessage(currentSession->socket, "231\r\n"); // Opponent already in game
+        res = 231;
+        pthread_mutex_unlock(&mutexVar.lock);
+        return res;
     }
 
-    int oppSock = getSocketByUsername(opp->userName);
+    if (opponentSession->currentAccount->status != MATCHING ||
+        strcmp(opponentSession->opponentAccount.userName, currentSession->currentAccount->userName) != 0) {
+        sendMessage(currentSession->socket, "233\r\n"); // No matching challenge
+        res = 233;
+        pthread_mutex_unlock(&mutexVar.lock);
+        return res;
+    }
 
     // ===== ACCEPT =====
-    if (strcmp(action, "ACCEPT") == 0) {
-        me->challengedBy = NULL;
-        opp->challenging = NULL;
-        me->isWaiting = false;
+    if (strcasecmp(response, "ACCEPT") == 0) {
+        currentSession->currentAccount->status = IN_GAME;
+        opponentSession->currentAccount->status = IN_GAME;
 
+        currentSession->opponentAccount = *(opponentSession->currentAccount);
+        opponentSession->opponentAccount = *(currentSession->currentAccount);
+
+        send(currentSession->socket, "131\r\n", strlen("131\r\n"), 0);
+        if (opponentSession->socket != -1)
+            send(opponentSession->socket, "131\r\n", strlen("131\r\n"), 0);
+
+        Match* m = createMatch(opponentSession, currentSession);
+        if (m != NULL) {
+            sendMatchStart(m);
+        }
+
+        res = 131;
         pthread_mutex_unlock(&mutexVar.lock);
-
-        send(session->socket, "131\r\n", 5, 0);
-        if (oppSock != -1)
-            send(oppSock, "131\r\n", 5, 0);
-
-        return;
+        return res;
     }
 
     // ===== REJECT =====
-    if (strcmp(action, "REJECT") == 0) {
-        me->challengedBy = NULL;
-        opp->challenging = NULL;
-        me->isWaiting = false;
+    if (strcasecmp(response, "REJECT") == 0) {
+        memset(&currentSession->opponentAccount, 0, sizeof(Account));
+        memset(&opponentSession->opponentAccount, 0, sizeof(Account));
+        currentSession->currentAccount->status = ONLINE;
+        opponentSession->currentAccount->status = ONLINE;
 
+        send(currentSession->socket, "132\r\n", strlen("132\r\n"), 0);
+        if (opponentSession->socket != -1)
+            send(opponentSession->socket, "132\r\n", strlen("132\r\n"), 0);
+
+        res = 132;
         pthread_mutex_unlock(&mutexVar.lock);
-
-        send(session->socket, "132\r\n", 5, 0);
-        if (oppSock != -1)
-            send(oppSock, "132\r\n", 5, 0);
-
-        return;
+        return res;
     }
 
+    send(currentSession->socket, "300\r\n", strlen("300\r\n"), 0);
+    res = 300;
     pthread_mutex_unlock(&mutexVar.lock);
-    send(session->socket, "300\r\n", 5, 0);
+    return res;
 }
 
 
 
+int handleMove(Session *currentSession, int game_id, int x, int y) {
+    if (!currentSession) return 500; 
 
+    printf("handleMove called: game_id=%d, x=%d, y=%d\n", game_id, x, y);
+
+
+    Match *match = findMatchById(game_id);
+    if (!match) {
+        sendMessage(currentSession->socket, "300\r\n"); 
+        return 300;
+    }
+
+    if ((match->turn == BLACK && currentSession != match->black) ||
+        (match->turn == WHITE && currentSession != match->white)) {
+        sendMessage(currentSession->socket, "250\r\n"); 
+        return 250;
+    }
+
+    if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE) {
+        sendMessage(currentSession->socket, "252\r\n");
+        return 252;
+    }
+
+    if (match->board[x][y] != EMPTY) {
+        sendMessage(currentSession->socket, "251\r\n");
+        return 251;
+    }
+
+    match->board[x][y] = match->turn;
+
+    Session *opponent = (currentSession == match->black) ? match->white : match->black;
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), "151 %s %d %d\r\n", 
+             currentSession->currentAccount->userName, x, y);
+    sendMessage(opponent->socket, msg);
+
+    match->turn = (match->turn == BLACK) ? WHITE : BLACK;
+
+
+    sendMessage(currentSession->socket, "150\r\n");
+
+    return 150;
+}
 
 
 int process_request(char process_buffer[], Session *currentSession) {
@@ -468,24 +460,70 @@ int process_request(char process_buffer[], Session *currentSession) {
     } else if (strcmp(cmd, "GET_READY_LIST") == 0) {
         res = getReadyList(currentSession);
         putLog(res, process_buffer, currentSession->client_addr);
-    } else if (strcmp(cmd, "CHALLENGE") == 0) {
-        char *opponentName = strtok_r(NULL, " ", &tmp);
-        if (!opponentName) {
-            const char *err = "300\r\n";
-            send(currentSession->socket, err, strlen(err), 0);
+    }else if (strcmp(cmd, "CHALLENGE") == 0) {
+        char *token;
+        char challenger[32];
+        token = strtok_r(NULL, " ", &tmp);
+        if (token) {
+            strncpy(challenger, token, sizeof(challenger) - 1);
+        }
+        printf("Opponent name: %s\n", challenger);
+        if (!challenger) {
+            sendMessage(currentSession->socket, "300\r\n");
             putLog(300, process_buffer, currentSession->client_addr);
             res = 300;
         } else {
-            res = handleChallenge(currentSession, opponentName);
+            res = handleChallenge(currentSession, challenger);
             putLog(res, process_buffer, currentSession->client_addr);
         }
     } else if (strcmp(cmd, "CHALLENGE_RESP") == 0) {
-        handle_challenge_resp(currentSession, process_buffer);
-        return 0;   
+        char challenger[32];
+        char response[sizeof("ACCEPT")];
+       
+        char *token;
+        token = strtok_r(NULL, " ", &tmp);
+        if (token) {
+            strncpy(challenger, token, sizeof(challenger) - 1);
+        }
+
+        token = strtok_r(NULL, " ", &tmp);
+        if (token) {
+            strncpy(response, token, sizeof(response) - 1);
+        }
+        res = handleChallengeResp(currentSession, response, challenger);
+        putLog(res, process_buffer, currentSession->client_addr);
+    } 
+    else if (strcmp(cmd, "MOVE") == 0) {
+        int game_id, x, y;
+        char *token;
+
+        token = strtok_r(NULL, " ", &tmp);
+        if (!token || sscanf(token, "%d", &game_id) != 1) {
+            sendMessage(currentSession->socket, "300\r\n");
+            putLog(300, process_buffer, currentSession->client_addr);
+            return 300;
+        }
+
+        token = strtok_r(NULL, " ", &tmp);
+        if (!token || sscanf(token, "%d", &x) != 1) {
+            sendMessage(currentSession->socket, "300\r\n");
+            putLog(300, process_buffer, currentSession->client_addr);
+            return 300;
+        }
+
+        token = strtok_r(NULL, " ", &tmp);
+        if (!token || sscanf(token, "%d", &y) != 1) {
+            sendMessage(currentSession->socket, "300\r\n");
+            putLog(300, process_buffer, currentSession->client_addr);
+            return 300;
+        }
+
+        res = handleMove(currentSession, game_id, x, y);
+        putLog(res, process_buffer, currentSession->client_addr);
     } else {
         // Unknown command
-        int bytes_sent = send(currentSession->socket, "300\r\n", strlen("300\r\n"), 0);
-        if (bytes_sent < 0) {
+        int bytes_sent = sendMessage(currentSession->socket, "300\r\n");
+        if (bytes_sent <= 0) {
             perror("send() error: ");
             return -1;
         }
@@ -494,51 +532,45 @@ int process_request(char process_buffer[], Session *currentSession) {
     return 0;
 }
 
+
+
 void *receive_request(void *arg) {
-    Session *currentSession = (Session *)arg;
+    Session currentSession = *(Session *)arg;
+    free(arg); // free allocated memory from main thread
+    addSessionToTable(&currentSession);
     char process_buffer[PREFIX_LEN + MAXLEN + 2];
     char temp_buffer[PREFIX_LEN + MAXLEN + 2];
     ssize_t received_bytes;
     char msg_buff[BUFF_SIZE];
     char *delimiter;
-
     memset(msg_buff, 0, sizeof(msg_buff));
     memset(process_buffer, 0, sizeof(process_buffer));
     memset(temp_buffer, 0, sizeof(temp_buffer));
     while (1) {
         do {
-            received_bytes = recv(currentSession->socket, msg_buff, sizeof(msg_buff) - 1, 0);
+            received_bytes = recv(currentSession.socket, msg_buff, sizeof(msg_buff) - 1, 0);
             if (received_bytes < 0) {
                 if (errno == EINTR) continue;
                 perror("recv() error");
-                // cleanup on error
-                if (currentSession->currentAccount) {
-                    currentSession->currentAccount->isLoggedIn = false;
-                    removeSessionFromTable(currentSession);
-                }
-                close(currentSession->socket);
-                free(currentSession);
+                close(currentSession.socket);
                 return NULL;
             } else if (received_bytes == 0) {
-                // connection closed by client
-                if (currentSession->currentAccount) {
-                    currentSession->currentAccount->isLoggedIn = false;
-                    removeSessionFromTable(currentSession);
-                }
                 printf("Connection closed by client.\n");
-                close(currentSession->socket);
-                free(currentSession);
+                logOut(&currentSession);
+                close(currentSession.socket);
+                removeSessionFromTable(&currentSession);
                 return NULL;
             }
 
             msg_buff[received_bytes] = '\0';
-            strcat(process_buffer, msg_buff);
+            strncat(process_buffer, msg_buff,
+                    sizeof(process_buffer) - strlen(process_buffer) - 1);
 
         } while ((delimiter = strstr(process_buffer, "\r\n")) == NULL);
         
         while ((delimiter = strstr(process_buffer, "\r\n")) != NULL) {
             *delimiter = '\0';  
-            process_request(process_buffer, currentSession);
+            process_request(process_buffer, &currentSession);
             strcpy(temp_buffer, delimiter + 2);
             strcpy(process_buffer, temp_buffer);
         }
@@ -548,12 +580,9 @@ void *receive_request(void *arg) {
         memset(temp_buffer, 0, sizeof(temp_buffer));
     }
     
-    // should not reach here, but clean up just in case
-    if (currentSession->currentAccount) {
-        currentSession->currentAccount->isLoggedIn = false;
-        removeSessionFromTable(currentSession);
-    }
-    close(currentSession->socket);
-    free(currentSession);
-    return NULL;
+    close(currentSession.socket);
+   
+
+    
 }
+#endif

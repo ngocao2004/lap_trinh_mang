@@ -4,9 +4,10 @@
 extern bool quitFlag;
 extern char buffer[];
 struct in_addr ipv4addr;
-pthread_mutex_t resp_mutex;
-pthread_cond_t resp_cond;
+pthread_mutex_t menuMutex;
+pthread_cond_t menuCond;
 int lastResponse;
+
 int main(int argc, char** argv) {
     char *temp = malloc(sizeof(argv[1]) * strlen(argv[1]));
 	strcpy(temp, argv[1]);
@@ -78,12 +79,7 @@ int main(int argc, char** argv) {
 		pthread_detach(recv_tid);
 	}
     while (!quitFlag) {
-		if (challengePending) {
-			challengeResponseMenu(client_sock, challenger); 
-			challengePending = false;                
-		} else {
-			showMenu(client_sock); 
-		}
+		showMenu(client_sock);
 	}
     close(client_sock);
     return 0;

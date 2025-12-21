@@ -1,3 +1,4 @@
+#define MATCH_IMPLEMENTATION
 
 #include "process.h"
 #include <stdio.h>
@@ -37,25 +38,19 @@ int main(int argc, char** argv) {
     struct sockaddr_in server_addr; /* server's address information */
     struct sockaddr_in client_addr; /* client's address information */
     pthread_t tid;
-    socklen_t sin_size;
+    int sin_size;
 
     if ((listen_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("socket() error: ");
         exit(EXIT_FAILURE);
     }
 
-    // Allow address reuse
-    int opt = 1;
-    if (setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        perror("setsockopt() failed");
-        close(listen_sock);
-        return EXIT_FAILURE;
-    }
-
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY); /* INADDR_ANY puts your IP address automatically */
+    int opt = 1;
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     if (bind(listen_sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
         perror("bind() error: ");
@@ -86,6 +81,7 @@ int main(int argc, char** argv) {
         args->socket = conn_sock;
         args->client_addr = client_addr;
         args->currentAccount = NULL;
+
         printf("New connection from %s:%d\n", inet_ntoa(args->client_addr.sin_addr), ntohs(args->client_addr.sin_port));
         send(args->socket, "100\r\n", strlen("100\r\n"), 0);
         pthread_create(&tid, NULL, receive_request, args);

@@ -3,7 +3,6 @@ CFLAGS = -Wall -Wextra -g
 
 CLIENT_SRC = TCPClient/client.c
 SERVER_SRC = TCPServer/server.c
-
 CLIENT_BIN = client
 SERVER_BIN = server
 

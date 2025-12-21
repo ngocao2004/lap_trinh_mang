@@ -1,17 +1,25 @@
+
+
+#ifndef ACCOUNT_H
+#define ACCOUNT_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <pthread.h>
 
+enum Status {
+    ONLINE,
+    MATCHING,
+    IN_GAME, 
+    OFFLINE
+};
 typedef struct Account {
-    char userName[10000];
-    char password[10000];
+    char userName[30];
+    char password[30];
     int score;
-    bool isLoggedIn; 
-    bool isWaiting;
-    struct Account* challengedBy;   
-    struct Account* challenging; 
+    enum Status status;
 } Account;
 
 
@@ -24,12 +32,13 @@ typedef struct Node {
     struct Node* right;     
 } Node;
 
-struct {
+typedef struct MutexVar {
     pthread_mutex_t lock;
     pthread_cond_t cond;
     bool ready;
-} mutexVar = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, true};
+} MutexVar;
 
+MutexVar mutexVar = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, true};
 Node *root;
 
 
@@ -46,6 +55,7 @@ Node* createNode(char* userName, char *password, int score) {
     strcpy(newNode->account.userName, userName);
     strcpy(newNode->account.password, password);
     newNode->account.score = score;
+    newNode->account.status = OFFLINE;
     newNode->left = NULL;
     newNode->right = NULL;   
     return newNode;
@@ -66,9 +76,6 @@ Node* createNode(char* userName, char *password, int score) {
 Node* insert(Node* r, char* userName, char* password, int score) {
     if (r == NULL){ 
         Node* newNode = createNode(userName, password, score);
-        FILE* file = fopen("account.txt", "a");
-        fprintf(file, "%s %s %d\n", userName, password, score);
-        fclose(file);
         return newNode;
     }
     int cmp = strcmp(r->account.userName, userName);
@@ -102,40 +109,6 @@ Node* find(Node* r, char* userName) {
 }
 
 
-int collectReadyUsers(Node* root,
-                      char* buffer,
-                      size_t bufferSize,
-                      Account* currentAccount)
-{
-    if (root == NULL) return 0;
-
-    int count = 0;
-
-    count += collectReadyUsers(root->left, buffer, bufferSize, currentAccount);
-
-    if (strcmp(root->account.userName,currentAccount->userName) != 0 &&
-        root->account.isLoggedIn &&
-        !root->account.isWaiting)
-    {
-        size_t len = strlen(buffer);
-        if (len < bufferSize - 3) {
-            snprintf(buffer + len,
-                    bufferSize - len,
-                    "%s\r\n",
-                    root->account.userName);
-            count++;
-        }
-    }
-
-
-    count += collectReadyUsers(root->right, buffer, bufferSize, currentAccount);
-
-    return count;
-}
-
-
-
-
 /**
  * @brief Load account data from file into BST, call only ONCE when program starts.
  *
@@ -152,8 +125,8 @@ int initList() {
     }
     root = NULL;
     while (!feof(file)) {
-        char name[10000]; 
-        char password[10000];
+        char name[30]; 
+        char password[30];
         int score;
         fscanf(file, "%s %s %d", name, password, &score);
         root = insert(root, name, password, score);         
@@ -161,6 +134,34 @@ int initList() {
     printf("Done!");
     fclose(file);
     return 0;
+}
+
+
+
+int collectReadyUsers(Node* root,
+                      char list [][40],
+                      int index,
+                      Account* currentAccount)
+{
+    if (root == NULL || index >= 4096) return 0;
+
+    int count = 0;
+
+    if (root->account.status == ONLINE &&
+        strcmp(root->account.userName, currentAccount->userName) != 0) {
+        strcpy(list[index], root->account.userName);
+        strcat(list[index], " ");
+        char scoreStr[10];
+        snprintf(scoreStr, sizeof(scoreStr), "%d", root->account.score);
+        strcat(list[index], scoreStr);
+        index++;
+        count++;
+    }
+
+    count += collectReadyUsers(root->left, list, index, currentAccount);
+    count += collectReadyUsers(root->right, list, index, currentAccount);
+
+    return count;
 }
 
 
@@ -178,3 +179,5 @@ void freeTree(Node* r) {
     free(r); 
     r = NULL;
 }
+
+#endif

@@ -1,3 +1,5 @@
+#define MATCH_IMPLEMENTATION
+#include "../TCPServer/match.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +19,18 @@
 #include <ctype.h>
 
 
+typedef struct {
+    int game_id;
+    char board[BOARD_SIZE][BOARD_SIZE];
+    char turn;         
+    int finished;
+    char blackName[32]; 
+    char whiteName[32]; 
+} ClientMatch;
+
+
+ClientMatch *currentMatch = NULL;
+
 #define BUFF_SIZE 4096
 #define CODE_LEN 3
 
@@ -25,13 +39,24 @@ char challenger[32];
 
 pthread_mutex_t resp_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t  resp_cond  = PTHREAD_COND_INITIALIZER;
-
 int lastResponse = -1;
 
 const char* responseCode[2] = {"+OK", "-ERR"};
 const char* commandPrefix[6] = {"LOGIN ","LOGOUT", "REGISTER ","GET_READY_LIST","CHALLENGE ","CHALLENGE_RESP "};
 char buffer[BUFF_SIZE];
 
+enum Menu{
+	MAIN,
+	CHALLENGE,
+	LOGIN,
+	LOGOUT,
+	REGISTER,
+	LIST,
+	INVITED,
+    GAME
+};
+
+enum Menu menu = MAIN;
 
 int sendMessage(int socketFd, char buffer[], const char *input, int type) {
     const char *prefix_str = commandPrefix[type];
@@ -148,23 +173,34 @@ void dispatch_message(char* msg, int sock)
         pthread_mutex_unlock(&resp_mutex);
     }
     else if (code == 130) {
-        printf("\nChallenge sent successfully\n");
+        printf("\nChallenge sent successfully\nWaiting for opponent...\n");
     }
     else if (code == 131) {
-        printf("\nChallenge accepted! Game start!\n");
+        printf("\nChallenge accepted! Game starting ...\n");
     }
     else if (code == 132) {
         printf("\nChallenge rejected\n");
+        menu = MAIN;
     }
     else if (code == 233) {
         printf("\nNo challenge exists\n");
+        menu = MAIN;
     }
     else if (code == 140) {  
+        if (challengePending){
+            char msg[256];
+            snprintf(msg, sizeof(msg),
+                 "CHALLENGE_RESP %s REJECT\r\n", challenger);
+            send(sock, msg, strlen(msg), 0);
+            return;
+        }
         char opponent[64];
         if (sscanf(msg, "140 %s", opponent) == 1) {
-            showChallengeMenu(sock, opponent);
-            return; 
+            strncpy(challenger, opponent, sizeof(challenger)-1);
+            challenger[sizeof(challenger)-1] = '\0';
+            challengePending = true;
         }
+        if( menu == MAIN ) menu = INVITED;
     }
 
     /* ===== READY LIST HEADER ===== */
@@ -176,50 +212,135 @@ void dispatch_message(char* msg, int sock)
         if (readyCount == 0) {
             printf("(No player online)\n");
             printf("=====================\n");
-            printf("\nYour option: ");
             fflush(stdout);
-            return;
         }
-
-        waitingReadyList = 1;
-        readyReceived = 0;
-        return;
+        else{
+            waitingReadyList = 1;
+            readyReceived = 0;
+        }
+        menu = MAIN;
     }
 
+    else if (code == 155) {
+        int gameId;
+        char black[32], white[32];
+        sscanf(msg, "155 %d %s %s", &gameId, black, white);
+
+        currentMatch = malloc(sizeof(ClientMatch));
+        currentMatch->game_id = gameId;
+        strcpy(currentMatch->blackName, black);
+        strcpy(currentMatch->whiteName, white);
+        currentMatch->turn = BLACK;
+        currentMatch->finished = 0;
+
+        initBoard(currentMatch);
+        printBoard(currentMatch);
+
+        printf("Game started: %s (X) vs %s (O)\n", black, white);
+        menu = GAME;
+        fflush(stdout);
+    }
+
+    else if (code == 150) {
+        printf("\nYour move accepted!\n");
+        fflush(stdout);
+    }
+    
+    else if (code == 151) {
+        char playerName[32];
+        int x, y;
+        if (sscanf(msg, "151 %s %d %d", playerName, &x, &y) == 3) {
+            char symbol = (strcmp(playerName, currentMatch->blackName) == 0) ? 'X' : 'O';
+            currentMatch->board[x][y] = symbol;
+
+            printf("\n>>> %s (%c) played at [%d, %d]\n", playerName, symbol, x, y);
+
+            // đổi lượt
+            currentMatch->turn = (currentMatch->turn == BLACK) ? WHITE : BLACK;
+
+            printBoard(currentMatch);
+            char* currentPlayer = (currentMatch->turn == BLACK) ? 
+                                currentMatch->blackName : currentMatch->whiteName;
+            printf("\nCurrent turn: %s (%c)\n", currentPlayer,
+                (currentMatch->turn == BLACK) ? 'X' : 'O');
+            fflush(stdout);
+        }
+    }
+
+    
+    else if (code == 250) {
+        printf("\nNot your turn!\n");
+        fflush(stdout);
+    }
+    
+    else if (code == 251) {
+        printf("\nPosition already occupied!\n");
+        fflush(stdout);
+    }
+    
+    else if (code == 252) {
+        printf("\nInvalid position (out of bounds)!\n");
+        fflush(stdout);
+    }
+    
+    else if (code == 300) {
+        printf("\nGame not found!\n");
+        if (currentMatch) {
+            free(currentMatch);
+            currentMatch = NULL;
+        }
+        menu = MAIN;
+        fflush(stdout);
+    }
+
+
+
+
     else if (strncmp(msg, "CHALLENGE ", 10) == 0) {
-        char opponent[32];
-        sscanf(msg, "CHALLENGE %s", opponent);
-        showChallengeMenu(sock, opponent);
+        sscanf(msg, "CHALLENGE %s", challenger);
     }
     else {
         printf("\n[Server] %s\n", msg);
     }
-
-    printf("\nYour option: ");
     fflush(stdout);
 }
 
 
-void showChallengeMenu(int sock, const char* opponent) {
+void showChallengeMenu(int sock) {
+    int choice;
+    char msg[256];
+    if (challenger == NULL) return;
+    printf("\nYou are challenged by %s\n", challenger);
+    printf("1. Accept challenge\n");
+    printf("2. Reject challenge\n");
+    printf("Your choice: ");
+    scanf("%d", &choice);
+    getchar();
 
-    strncpy(challenger, opponent, sizeof(challenger)-1);
-    challenger[sizeof(challenger)-1] = '\0';
-
-    challengePending = true;
-
-    printf("\nYou are challenged by %s!\n", opponent);
-    printf("Please respond in the main menu.\n");
+    if (choice == 1) {
+        snprintf(msg, sizeof(msg),
+                 "CHALLENGE_RESP %s ACCEPT\r\n", challenger);
+        send(sock, msg, strlen(msg), 0);
+    }
+    else if (choice == 2) {
+        snprintf(msg, sizeof(msg),
+                 "CHALLENGE_RESP %s REJECT\r\n", challenger);
+        send(sock, msg, strlen(msg), 0);
+    }
+    else {
+        printf("Invalid choice.\n");
+    }
 }
-
 /**
  * @brief Sends login request to server and handles response.
  * @param socketFd Socket file descriptor.
  * @return Server response code, -1 on error.
  */
 int logIn(int socketFd) {
+    if (menu != MAIN) return -1;
     char userName[100];
     char password[100];
-
+    menu = LOGIN;
     printf("\nUsername: ");
     fgets(userName, sizeof(userName), stdin);
     printf("Password: ");
@@ -256,6 +377,7 @@ int logIn(int socketFd) {
         default:
             printf("Server response: %d\n", res);
     }
+    menu = MAIN;
     return res;
 }
 
@@ -268,6 +390,8 @@ int logIn(int socketFd) {
  * @return Server response code, -1 on error.
  */
 int logOut(int socketFd) {
+    if (menu != MAIN) return -1;
+    menu = LOGOUT;
     if (sendMessage(socketFd, buffer, "", 1) == -1) {
         printf("Send LOGOUT failed\n");
         return -1;
@@ -279,7 +403,9 @@ int logOut(int socketFd) {
 
 
 int getReadyList(int socketFd)
-{
+{   
+    if (menu != MAIN) return -1;
+    menu = LIST;
     if (sendMessage(socketFd, buffer, "", 3) == -1) {
         printf("Failed to send GET_READY_LIST\n");
         return -1;
@@ -294,47 +420,22 @@ int getReadyList(int socketFd)
 
 
 int challengePlayer(int socketFd) {
+    if (menu != MAIN) return -1;
+    menu = CHALLENGE;
     char opponent[256];
 
     printf("\nEnter username to challenge: ");
     fgets(opponent, sizeof(opponent), stdin);
     opponent[strcspn(opponent, "\n")] = 0;
-
     if (sendMessage(socketFd, buffer, opponent, 4) == -1) {
         printf("Send challenge failed\n");
         return -1;
     }
 
-    printf("Challenge request sent.\n");
+    printf("Challenge request sent to %s!\n", opponent);
     return 0;
 }
 
-
-void challengeResponseMenu(int socketFd, const char *opponent) {
-    int choice;
-    char msg[256];
-
-    printf("\nYou are challenged by %s\n", opponent);
-    printf("1. Accept challenge\n");
-    printf("2. Reject challenge\n");
-    printf("Your choice: ");
-    scanf("%d", &choice);
-    getchar();
-
-    if (choice == 1) {
-        snprintf(msg, sizeof(msg),
-                 "CHALLENGE_RESP %s ACCEPT\r\n", opponent);
-        send(socketFd, msg, strlen(msg), 0);
-    }
-    else if (choice == 2) {
-        snprintf(msg, sizeof(msg),
-                 "CHALLENGE_RESP %s REJECT\r\n", opponent);
-        send(socketFd, msg, strlen(msg), 0);
-    }
-    else {
-        printf("Invalid choice.\n");
-    }
-}
 
 
 
@@ -379,22 +480,90 @@ void quit() {
 
 
 
+
 /**
  * @brief Displays menu options and executes selected user action.
  * @param socketFd Socket file descriptor.
  */
+
 void showMenu(int socketFd) {
-    printf("\nMenu:\n1. Log in\n2. Log out\n3. Register \n4. Get ready list\n5. Challenge a player\n6. Quit\nYour option: ");
-    int choice;
-    scanf("%d", &choice);
-    getchar(); 
-    switch (choice) {
-        case 1: logIn(socketFd); break;
-        case 2: logOut(socketFd); break;
-        case 3: signUp(socketFd); break;
-        case 4: getReadyList(socketFd); break;
-        case 5: challengePlayer(socketFd); break;
-        case 6: quit(); break;      
-        default: printf("\nPlease choose from 1 to 4!"); break;
+
+    switch (menu) {
+        case MAIN: {
+            printf("\nMenu:\n"
+                   "1. Log in\n"
+                   "2. Log out\n"
+                   "3. Register \n"
+                   "4. Get ready list\n"
+                   "5. Challenge a player\n"
+                   "6. See challenge(%d)\n"
+                   "7. Quit\n", challengePending);
+            int choice;
+            printf("Your choice: ");
+            scanf("%d", &choice);
+            getchar(); // clear newline
+            switch (choice) {
+                case 1: logIn(socketFd); break;
+                case 2: logOut(socketFd); break;
+                case 3: signUp(socketFd); break;
+                case 4: getReadyList(socketFd); break;
+                case 5: challengePlayer(socketFd); break;
+                case 6: showChallengeMenu(socketFd); break;
+                case 7: quit(); break;
+                default: printf("\nPlease choose from 1 to 7!"); break;
+            }
+            break;
+        }
+
+        case CHALLENGE:
+            printf("Waiting for challenge response...\n");
+            break;
+
+        case GAME:
+            if (currentMatch == NULL || currentMatch->finished) {
+                printf("\nNo active game!\n");
+                menu = MAIN;
+                break;
+            }
+
+            printBoard(currentMatch);
+
+            printf("\nYour move (row col) or 'surrender': ");
+            fflush(stdout);
+
+            char input[128];
+            if (fgets(input, sizeof(input), stdin) == NULL) break;
+
+            input[strcspn(input, "\n")] = 0;
+            if (strlen(input) == 0) break;
+
+            if (strcasecmp(input, "surrender") == 0) {
+                printf("\nAre you sure? (y/n): ");
+                char confirm;
+                scanf("%c", &confirm);
+                getchar();
+
+                if (confirm == 'y' || confirm == 'Y') {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "SURRENDER %d\r\n", currentMatch->game_id);
+                    send(socketFd, msg, strlen(msg), 0);
+                    currentMatch->finished = 1;
+                    menu = MAIN;
+                    printf("🏳 Surrender request sent!\n");
+                }
+                break;
+            }
+
+            int x, y;
+            if (sscanf(input, "%d %d", &x, &y) == 2) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "MOVE %d %d %d\r\n",
+                        currentMatch->game_id, x, y);
+                send(socketFd, msg, strlen(msg), 0);
+                printf("📤 Move sent: [%d, %d]\n", x, y);
+            } else {
+                printf("✗ Invalid format! Use: row col (e.g., 7 7)\n");
+            }
+            break;
     }
 }
