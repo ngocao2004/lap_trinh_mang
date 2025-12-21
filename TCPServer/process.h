@@ -391,23 +391,71 @@ int handleChallengeResp(Session* currentSession, const char response[], const ch
     return res;
 }
 
+int countDir(int board[BOARD_SIZE][BOARD_SIZE],
+             int x, int y, int dx, int dy, int player) {
+    int count = 0;
+    x += dx;
+    y += dy;
+
+    while (x >= 0 && x < BOARD_SIZE &&
+           y >= 0 && y < BOARD_SIZE &&
+           board[x][y] == player) {
+        count++;
+        x += dx;
+        y += dy;
+    }
+    return count;
+}
+
+int checkWin(int board[BOARD_SIZE][BOARD_SIZE],
+             int x, int y, int player) {
+    int total;
+
+    total = 1 + countDir(board, x, y, 0, 1, player)
+                + countDir(board, x, y, 0, -1, player);
+    if (total >= 5) return 1;
+
+    total = 1 + countDir(board, x, y, 1, 0, player)
+                + countDir(board, x, y, -1, 0, player);
+    if (total >= 5) return 1;
+
+    total = 1 + countDir(board, x, y, 1, 1, player)
+                + countDir(board, x, y, -1, -1, player);
+    if (total >= 5) return 1;
+
+    total = 1 + countDir(board, x, y, 1, -1, player)
+                + countDir(board, x, y, -1, 1, player);
+    if (total >= 5) return 1;
+
+    return 0;
+}
+
+int isBoardFull(int board[BOARD_SIZE][BOARD_SIZE]) {
+    for (int i = 0; i < BOARD_SIZE; i++)
+        for (int j = 0; j < BOARD_SIZE; j++)
+            if (board[i][j] == EMPTY)
+                return 0;
+    return 1;
+}
+
+
 
 
 int handleMove(Session *currentSession, int game_id, int x, int y) {
-    if (!currentSession) return 500; 
+    if (!currentSession) return 500;
 
-    printf("handleMove called: game_id=%d, x=%d, y=%d\n", game_id, x, y);
-
+    printf("handleMove called: game_id=%d, x=%d, y=%d\n",
+           game_id, x, y);
 
     Match *match = findMatchById(game_id);
-    if (!match) {
-        sendMessage(currentSession->socket, "300\r\n"); 
+    if (!match || match->finished) {
+        sendMessage(currentSession->socket, "300\r\n");
         return 300;
     }
 
     if ((match->turn == BLACK && currentSession != match->black) ||
         (match->turn == WHITE && currentSession != match->white)) {
-        sendMessage(currentSession->socket, "250\r\n"); 
+        sendMessage(currentSession->socket, "250\r\n");
         return 250;
     }
 
@@ -423,18 +471,35 @@ int handleMove(Session *currentSession, int game_id, int x, int y) {
 
     match->board[x][y] = match->turn;
 
-    Session *opponent = (currentSession == match->black) ? match->white : match->black;
+    Session *opponent =
+        (currentSession == match->black) ? match->white : match->black;
 
     char msg[64];
-    snprintf(msg, sizeof(msg), "151 %s %d %d\r\n", 
+    snprintf(msg, sizeof(msg), "151 %s %d %d\r\n",
              currentSession->currentAccount->userName, x, y);
     sendMessage(opponent->socket, msg);
 
+    if (checkWin(match->board, x, y, match->turn)) {
+        match->finished = 1;
+
+        sendMessage(currentSession->socket, "172 You win!\r\n");
+        sendMessage(opponent->socket, "173 You lose!\r\n");
+
+        return 172;
+    }
+
+    if (isBoardFull(match->board)) {
+        match->finished = 1;
+
+        sendMessage(match->black->socket, "174 Draw\r\n");
+        sendMessage(match->white->socket, "174 Draw\r\n");
+
+        return 174;
+    }
+
     match->turn = (match->turn == BLACK) ? WHITE : BLACK;
 
-
     sendMessage(currentSession->socket, "150\r\n");
-
     return 150;
 }
 
@@ -520,8 +585,63 @@ int process_request(char process_buffer[], Session *currentSession) {
 
         res = handleMove(currentSession, game_id, x, y);
         putLog(res, process_buffer, currentSession->client_addr);
-    } else {
-        // Unknown command
+    } 
+    else if (strcmp(cmd, "REQUEST_STOP") == 0) {
+        int gameId;
+        char *token;
+
+        token = strtok_r(NULL, " ", &tmp);
+        if (!token || sscanf(token, "%d", &gameId) != 1) {
+            sendMessage(currentSession->socket, "300\r\n");
+            putLog(300, process_buffer, currentSession->client_addr);
+            return 300;
+        }
+
+        if (!currentSession || !currentSession->currentAccount) {
+            sendMessage(currentSession->socket, "214\r\n");
+            putLog(214, process_buffer, currentSession->client_addr);
+            return 214;
+        }
+
+        Match *m = findMatchById(gameId);
+        if (!m || m->finished) {
+            sendMessage(currentSession->socket, "500\r\n");
+            putLog(500, process_buffer, currentSession->client_addr);
+            return 500;
+        }
+
+        Session *loser = NULL;
+        Session *winner = NULL;
+
+        if (m->black == currentSession) {
+            loser = m->black;
+            winner = m->white;
+        } else if (m->white == currentSession) {
+            loser = m->white;
+            winner = m->black;
+        } else {
+            sendMessage(currentSession->socket, "500\r\n");
+            putLog(500, process_buffer, currentSession->client_addr);
+            return 500;
+        }
+
+        m->finished = 1;
+
+
+        sendMessage(loser->socket, "170\r\n");
+
+        if (winner && winner->socket != -1) {
+            char msg[128];
+            snprintf(msg, sizeof(msg),
+                    "171 %s surrendered. You win!\r\n",
+                    loser->currentAccount->userName);
+            send(winner->socket, msg, strlen(msg), 0);
+        }
+
+        putLog(171, process_buffer, currentSession->client_addr);
+        return 171;
+    }
+ else {
         int bytes_sent = sendMessage(currentSession->socket, "300\r\n");
         if (bytes_sent <= 0) {
             perror("send() error: ");
