@@ -25,7 +25,6 @@ typedef struct Match {
 extern Match *matchList[MAX_MATCH];
 extern int matchCount;
 
-// Prototype
 Match* createMatch(Session *player1, Session *player2);
 void initBoard(Match *m);
 void sendMatchStart(Match *m);
@@ -39,17 +38,14 @@ int matchCount = 0;
 static int nextGameId = 1;
 
 void initBoard(Match *m) {
-    printf("[DEBUG initBoard] BEFORE: finished=%d\n", m->finished);
     for (int i = 0; i < BOARD_SIZE; i++) {
         for (int j = 0; j < BOARD_SIZE; j++) {
             m->board[i][j] = EMPTY;
         }
     }
-    printf("[DEBUG initBoard] AFTER: finished=%d\n", m->finished);
 }
 
 void printBoard(Match *m) {
-    printf("[DEBUG printboard] BEFORE: finished=%d\n", m->finished);
     printf("  ");
     for (int j = 0; j < BOARD_SIZE; j++)
         printf("%d ", j);
@@ -62,7 +58,6 @@ void printBoard(Match *m) {
         }
         printf("\n");
     }
-    printf("[DEBUG printboard] AFTER: finished=%d\n", m->finished);
 }
 
 
