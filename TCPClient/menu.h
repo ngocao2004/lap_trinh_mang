@@ -82,7 +82,18 @@ const char* responseCode[2] = {"+OK", "-ERR"};
 const char* commandPrefix[6] = {"LOGIN ","LOGOUT", "REGISTER ","GET_READY_LIST","CHALLENGE ","CHALLENGE_RESP "};
 char buffer[BUFF_SIZE];
 
+enum Menu{
+	MAIN,
+	CHALLENGE,
+	LOGIN,
+	LOGOUT,
+	REGISTER,
+	LIST,
+	INVITED,
+    GAME
+};
 
+enum Menu menu = MAIN;
 
 int sendMessage(int socketFd, char buffer[], const char *input, int type) {
     const char *prefix_str = commandPrefix[type];
@@ -684,6 +695,7 @@ void playerMove(int socketFd){
         fflush(stdout);
     }
 }
+
 bool quitFlag = false;
 
 
@@ -779,5 +791,32 @@ void showMenu(int socketFd) {
                 break;
             }
             break;
+    }
+    switch (menu){
+        case MAIN:
+            printf("\nMenu:\n1. Log in\n2. Log out\n3. Register \n4. Get ready list\n5. Challenge a player\n6. See challenge(%d)\n7.Quit\n", challengePending);
+            int choice;
+            printf("Your choice: ");
+            scanf("%d", &choice);
+            getchar(); 
+            switch (choice) {
+                case 1: logIn(socketFd); break;
+                case 2: logOut(socketFd); break;
+                case 3: signUp(socketFd); break;
+                case 4: getReadyList(socketFd); break;
+                case 5: challengePlayer(socketFd); break;
+                case 6: showChallengeMenu(socketFd); break; 
+                case 7: quit();     
+                default: printf("\nPlease choose from 1 to 7!"); break;
+                }
+            break;
+        case CHALLENGE:
+            printf("Waiting for challenge response...");
+            break;
+        case GAME:
+            printf("Game in progress...");
+            break;
+
+             
     }
 }

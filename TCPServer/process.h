@@ -561,7 +561,137 @@ int handleRequestStop(Session *currentSession, int gameId) {
     return 170;
 }
 
+int handleChallenge(Session* currentSession, char opponentName[]) {
+    if (!currentSession->currentAccount) {
+        sendMessage(currentSession->socket, "214\r\n");
+        return 214;
+    }
 
+    pthread_mutex_lock(&mutexVar.lock);
+    while (mutexVar.ready == false) {
+        pthread_cond_wait(&mutexVar.cond, &mutexVar.lock);
+    }
+    mutexVar.ready = false;
+    int res = -1;
+
+    // Send challenge request to opponent
+    printf("Challenging %s\n", opponentName);
+    int opp = getSessionByUsername(opponentName);
+    if (opp < 0) {
+        sendMessage(currentSession->socket, "230\r\n");
+        res = 230;
+    }
+    else {
+        printf("HI");
+        Session *opponentSession = sessionTable[opp];
+        if (opponentSession->currentAccount == NULL || opponentSession->currentAccount->status == OFFLINE) {
+            sendMessage(currentSession->socket, "230\r\n");
+            res = 230;
+        }
+
+        else if (opponentSession->currentAccount->status != ONLINE) {
+            sendMessage(currentSession->socket, "231\r\n");
+            res = 231;
+        }
+
+        else if(abs(currentSession->currentAccount->score - opponentSession->currentAccount->score) > 10) {
+            sendMessage(currentSession->socket, "232\r\n");
+            res = 232;
+        }
+        
+        else {
+            currentSession->currentAccount->status = MATCHING;
+            char challengeMsg[BUFF_SIZE];
+            snprintf(challengeMsg, sizeof(challengeMsg), "CHALLENGE %s\r\n", currentSession->currentAccount->userName);
+            sendMessage(opponentSession->socket, challengeMsg);
+            sendMessage(currentSession->socket, "130\r\n");
+            currentSession->opponentAccount = *(opponentSession->currentAccount);
+            res = 130;
+        }
+    }
+    mutexVar.ready = true;
+    pthread_cond_signal(&mutexVar.cond);
+    pthread_mutex_unlock(&mutexVar.lock);
+    return res;
+}
+
+int handleChallengeResp(Session* currentSession, char response[], char challenger[] ) {
+    
+    if (!currentSession->currentAccount) {
+        sendMessage(currentSession->socket, "214\r\n");
+        return 214;
+    }
+    int res = -1;
+    challenger[strcspn(challenger, "\n")] = 0;
+    pthread_mutex_lock(&mutexVar.lock);
+    while (mutexVar.ready == false) {
+        pthread_cond_wait(&mutexVar.cond, &mutexVar.lock);
+    }
+    mutexVar.ready = false;
+    int opp = getSessionByUsername(challenger);
+    if (opp < 0) {
+        sendMessage(currentSession->socket, "230\r\n");
+        res = 230;
+    }
+    else {
+        Session *opponentSession = sessionTable[opp];
+        printf("HI!!!");
+        if (opponentSession->currentAccount == NULL || opponentSession->currentAccount->status == OFFLINE) {       
+            sendMessage(currentSession->socket, "230\r\n");
+            res = 230;
+        }
+        else if(opponentSession->currentAccount->status == IN_GAME){
+            sendMessage(currentSession->socket, "231\r\n");
+            res = 231;
+        }
+      
+        else if (strcmp(opponentSession->opponentAccount.userName, currentSession->currentAccount->userName) != 0) {
+            sendMessage(currentSession->socket, "233\r\n");
+            res = 233;
+        }
+        else if (opponentSession->currentAccount->status == MATCHING) {
+            // ===== ACCEPT =====
+            if (strcmp(response, "ACCEPT") == 0) {
+                printf("HI1!!!");
+                currentSession->currentAccount->status = IN_GAME;
+                opponentSession->currentAccount->status = IN_GAME;
+                currentSession->opponentAccount = *(opponentSession->currentAccount);
+                opponentSession->opponentAccount = *(currentSession->currentAccount);
+                
+
+                send(currentSession->socket, "131\r\n", 5, 0);
+                if (opponentSession->socket != -1)
+                    send(opponentSession->socket, "131\r\n", 5, 0);
+
+                res = 131;
+            }
+
+            // ===== REJECT =====
+            if (strcmp(response, "REJECT") == 0) {
+                printf("HI2!!!");
+                memset(&currentSession->opponentAccount, 0, sizeof(Account));
+                memset(&opponentSession->opponentAccount, 0, sizeof(Account));
+                currentSession->currentAccount->status = ONLINE;
+                opponentSession->currentAccount->status = ONLINE;
+                send(currentSession->socket, "132\r\n", 5, 0);
+                if (opponentSession->socket != -1)
+                    send(opponentSession->socket, "132\r\n", 5, 0);
+
+                res = 132;
+            }
+        }
+        return res;
+    }
+        send(currentSession->socket, "300\r\n", 5, 0);
+        res = 300;
+        mutexVar.ready = true;
+        pthread_cond_signal(&mutexVar.cond);
+        pthread_mutex_unlock(&mutexVar.lock);
+    
+    
+    return res;
+
+}
 int process_request(char process_buffer[], Session *currentSession) {
     int res = 300;
     process_buffer[strcspn(process_buffer, "\r\n")] = '\0';
