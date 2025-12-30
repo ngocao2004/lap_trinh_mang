@@ -1,15 +1,25 @@
+
+
+#ifndef ACCOUNT_H
+#define ACCOUNT_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <pthread.h>
 
+enum Status {
+    ONLINE,
+    MATCHING,
+    IN_GAME, 
+    OFFLINE
+};
 typedef struct Account {
-    char userName[10000];
-    char password[10000];
+    char userName[30];
+    char password[30];
     int score;
-    bool isLoggedIn; 
-    bool isWaiting;
+    enum Status status;
 } Account;
 
 
@@ -22,17 +32,18 @@ typedef struct Node {
     struct Node* right;     
 } Node;
 
-struct {
+typedef struct MutexVar {
     pthread_mutex_t lock;
     pthread_cond_t cond;
     bool ready;
-} mutexVar = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, true};
+} MutexVar;
 
+MutexVar mutexVar = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, true};
 Node *root;
 
 
 /**
- * @brief Create a new BST node with account data.
+ * @brief Create a new BST r with account data.
  *
  * @param userName A pointer to the username string.
  * @param status   Account status ( 1 = active, 0 = banned).
@@ -44,6 +55,7 @@ Node* createNode(char* userName, char *password, int score) {
     strcpy(newNode->account.userName, userName);
     strcpy(newNode->account.password, password);
     newNode->account.score = score;
+    newNode->account.status = OFFLINE;
     newNode->left = NULL;
     newNode->right = NULL;   
     return newNode;
@@ -53,13 +65,13 @@ Node* createNode(char* userName, char *password, int score) {
 /**
  * @brief Insert an account into the binary search tree.
  *
- * If the username already exists, no new node is inserted.
+ * If the username already exists, no new r is inserted.
  *
  * @param r        Root of the BST.
  * @param userName A pointer to the username string.
  * @param status   Account status.
  *
- * @return A pointer to the root node of the updated BST.
+ * @return A pointer to the root r of the updated BST.
  */
 Node* insert(Node* r, char* userName, char* password, int score) {
     if (r == NULL){ 
@@ -81,7 +93,7 @@ Node* insert(Node* r, char* userName, char* password, int score) {
 
 
 /**
- * @brief Find an account node in the BST by username.
+ * @brief Find an account r in the BST by username.
  *
  * @param r        Root of the BST.
  * @param userName A pointer to the username string.
@@ -113,8 +125,8 @@ int initList() {
     }
     root = NULL;
     while (!feof(file)) {
-        char name[10000]; 
-        char password[10000];
+        char name[30]; 
+        char password[30];
         int score;
         fscanf(file, "%s %s %d", name, password, &score);
         root = insert(root, name, password, score);         
@@ -126,11 +138,74 @@ int initList() {
 
 
 
+int collectReadyUsers(Node* root,
+                      char list [][40],
+                      int index,
+                      Account* currentAccount)
+{
+    if (root == NULL || index >= 4096) return 0;
+
+    int count = 0;
+
+    if (root->account.status == ONLINE &&
+        strcmp(root->account.userName, currentAccount->userName) != 0) {
+        strcpy(list[index], root->account.userName);
+        strcat(list[index], " ");
+        char scoreStr[10];
+        snprintf(scoreStr, sizeof(scoreStr), "%d", root->account.score);
+        strcat(list[index], scoreStr);
+        index++;
+        count++;
+    }
+
+    count += collectReadyUsers(root->left, list, index, currentAccount);
+    count += collectReadyUsers(root->right, list, index, currentAccount);
+
+    return count;
+}
+
+
+
 /**
  * @brief Recursively free memory allocated for the BST.
  *
  * @param r Root of the BST.
  */
+
+void save_account_node(FILE *f, Node *r) {
+    if (r == NULL) return;
+
+    save_account_node(f, r->left);
+
+    fprintf(f, "%s %s %d\n",
+            r->account.userName,
+            r->account.password,
+            r->account.score);
+    save_account_node(f, r->right);
+}
+
+void save_accounts(const char *filename) {
+    pthread_mutex_lock(&mutexVar.lock);
+    while (!mutexVar.ready) {
+        pthread_cond_wait(&mutexVar.cond, &mutexVar.lock);
+    }
+    mutexVar.ready = false;
+    FILE *f = fopen(filename, "w");
+    if (!f) {
+        perror("fopen");
+        pthread_mutex_unlock(&mutexVar.lock);
+        return;
+    }
+
+    save_account_node(f, root);
+
+    fclose(f);
+    mutexVar.ready = true;
+    pthread_cond_signal(&mutexVar.cond);
+    pthread_mutex_unlock(&mutexVar.lock);
+
+}
+
 
 void freeTree(Node* r) {
     if (r == NULL) return;
@@ -139,3 +214,5 @@ void freeTree(Node* r) {
     free(r); 
     r = NULL;
 }
+
+#endif

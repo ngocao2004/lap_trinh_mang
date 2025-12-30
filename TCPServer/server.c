@@ -1,3 +1,4 @@
+#define MATCH_IMPLEMENTATION
 
 #include "process.h"
 #include <stdio.h>
@@ -13,7 +14,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <pthread.h>
-
+#include <signal.h>
 #define BACKLOG 20
 
 extern Node* root;
@@ -21,6 +22,13 @@ extern Node* root;
  * Receive and echo message to client
  * [IN] sockfd: socket descriptor that connects to client
  */
+
+volatile sig_atomic_t keep_running = 1;
+
+
+void handle_sigint(int sig) {
+    keep_running = 0;
+}
 
 
 int main(int argc, char** argv) {
@@ -48,6 +56,8 @@ int main(int argc, char** argv) {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY); /* INADDR_ANY puts your IP address automatically */
+    int opt = 1;
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     if (bind(listen_sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
         perror("bind() error: ");
@@ -62,8 +72,13 @@ int main(int argc, char** argv) {
   
 
     printf("\nServer started at port number %d!\n", PORT);
+    struct sigaction sa;
+    sa.sa_handler = handle_sigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; 
+    sigaction(SIGINT, &sa, NULL);
 
-    while (1) {
+    while (keep_running) {
         sin_size = sizeof(struct sockaddr_in);
         if ((conn_sock = accept(listen_sock, (struct sockaddr*)&client_addr, &sin_size)) == -1) {
             if (errno == EINTR)
@@ -78,6 +93,7 @@ int main(int argc, char** argv) {
         args->socket = conn_sock;
         args->client_addr = client_addr;
         args->currentAccount = NULL;
+
         printf("New connection from %s:%d\n", inet_ntoa(args->client_addr.sin_addr), ntohs(args->client_addr.sin_port));
         send(args->socket, "100\r\n", strlen("100\r\n"), 0);
         pthread_create(&tid, NULL, receive_request, args);
@@ -88,6 +104,8 @@ int main(int argc, char** argv) {
     }
 
     close(listen_sock);
+    save_accounts("account.txt");
+    freeTree(root);
     return 0;
 }
 
