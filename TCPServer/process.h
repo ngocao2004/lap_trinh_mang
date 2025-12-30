@@ -162,7 +162,7 @@ int logOut(Session* currentSession) {
                 perror("send() error: ");
                 return -1;
             }
-        return 214;
+        return 221;
     }
     pthread_mutex_lock(&mutexVar.lock);
     while (mutexVar.ready == false) {
@@ -207,7 +207,7 @@ int signUp(char *username, char *password, Session *currentSession) {
     Node* result = find(root, username);
     if (result != NULL) {
         bytes_sent = send(currentSession->socket, "212\r\n", strlen("212\r\n"), 0);
-        res = 212;
+        return 212;
     }
 
     root = insert(root, username, password, 100); // Default status is active
@@ -230,9 +230,9 @@ int signUp(char *username, char *password, Session *currentSession) {
 
 int getReadyList(Session* currentSession)
 {
-    if (!currentSession->currentAccount) {
-        sendMessage(currentSession->socket, "214\r\n");
-        return 214;
+    if (currentSession->currentAccount == NULL) {
+        sendMessage(currentSession->socket, "221\r\n");
+        return 221;
     }
 
     char list[4096][40];
@@ -254,23 +254,21 @@ int getReadyList(Session* currentSession)
 }
 
 int handleChallenge(Session* currentSession, char opponentName[]) {
-    if (!currentSession->currentAccount) {
-        sendMessage(currentSession->socket, "214\r\n");
-        return 214;
+    if (currentSession->currentAccount == NULL) {
+        sendMessage(currentSession->socket, "221\r\n");
+        return 221;
     }
 
     pthread_mutex_lock(&mutexVar.lock);
     int res = -1;
 
     // Send challenge request to opponent
-    printf("Challenging %s\n", opponentName);
     int opp = getSessionByUsername(opponentName);
     if (opp < 0) {
         sendMessage(currentSession->socket, "230\r\n");
         res = 230;
     }
     else {
-        printf("HI");
         Session *opponentSession = sessionTable[opp];
         if (opponentSession->currentAccount == NULL || opponentSession->currentAccount->status == OFFLINE) {
             sendMessage(currentSession->socket, "230\r\n");
@@ -283,7 +281,9 @@ int handleChallenge(Session* currentSession, char opponentName[]) {
         }
 
         else if(abs(currentSession->currentAccount->score - opponentSession->currentAccount->score) > 10) {
-            sendMessage(currentSession->socket, "232\r\n");
+            char msg[64];
+            snprintf(msg, sizeof(msg), "232 %d %d\r\n", currentSession->currentAccount->score, opponentSession->currentAccount->score);
+            sendMessage(currentSession->socket, msg);
             res = 232;
         }
         
@@ -302,9 +302,9 @@ int handleChallenge(Session* currentSession, char opponentName[]) {
 }
 
 int handleChallengeResp(Session* currentSession, const char response[], const char challenger[]) {
-    if (!currentSession->currentAccount) {
-        sendMessage(currentSession->socket, "214\r\n"); // Not logged in
-        return 214;
+    if (currentSession->currentAccount == NULL) {
+        sendMessage(currentSession->socket, "221\r\n"); // Not logged in
+        return 221;
     }
 
     int res = -1;
@@ -386,11 +386,11 @@ int handleChallengeResp(Session* currentSession, const char response[], const ch
 }
 
 int countDir(char board[BOARD_SIZE][BOARD_SIZE],
-             int x, int y, int dx, int dy, char player) {
+             int x, int y, int dx, int dy, int turn) {
     int count = 0;
     x += dx;
     y += dy;
-
+    char player = (turn % 2 == 0)? 'X': 'O';
     while (x >= 0 && x < BOARD_SIZE &&
            y >= 0 && y < BOARD_SIZE &&
            board[x][y] == player) {
@@ -402,23 +402,23 @@ int countDir(char board[BOARD_SIZE][BOARD_SIZE],
 }
 
 int checkWin(char board[BOARD_SIZE][BOARD_SIZE],
-             int x, int y, char player) {
+             int x, int y, int turn) {
     int total;
 
-    total = 1 + countDir(board, x, y, 0, 1, player)
-                + countDir(board, x, y, 0, -1, player);
+    total = 1 + countDir(board, x, y, 0, 1, turn)
+                + countDir(board, x, y, 0, -1, turn);
     if (total >= 5) return 1;
 
-    total = 1 + countDir(board, x, y, 1, 0, player)
-                + countDir(board, x, y, -1, 0, player);
+    total = 1 + countDir(board, x, y, 1, 0, turn)
+                + countDir(board, x, y, -1, 0, turn);
     if (total >= 5) return 1;
 
-    total = 1 + countDir(board, x, y, 1, 1, player)
-                + countDir(board, x, y, -1, -1, player);
+    total = 1 + countDir(board, x, y, 1, 1, turn)
+                + countDir(board, x, y, -1, -1, turn);
     if (total >= 5) return 1;
 
-    total = 1 + countDir(board, x, y, 1, -1, player)
-                + countDir(board, x, y, -1, 1, player);
+    total = 1 + countDir(board, x, y, 1, -1, turn)
+                + countDir(board, x, y, -1, 1, turn);
     if (total >= 5) return 1;
 
     return 0;
@@ -444,8 +444,8 @@ int handleMove(Session *currentSession, int game_id, int x, int y) {
         return 300;
     }
 
-    if ((match->turn == BLACK && currentSession != match->black) ||
-        (match->turn == WHITE && currentSession != match->white)) {
+    if ((match->turn%2 == 0 && currentSession != match->black) ||
+        (match->turn%2 == 1 && currentSession != match->white)) {
         sendMessage(currentSession->socket, "250\r\n");
         return 250;
     }
@@ -459,48 +459,65 @@ int handleMove(Session *currentSession, int game_id, int x, int y) {
         sendMessage(currentSession->socket, "251\r\n");
         return 251;
     }
-
-    match->board[x][y] = match->turn;
+    match->moves[match->turn].x = x;
+    match->moves[match->turn].y = y;
+    match->moves[match->turn].isO = ((match->turn)%2 == 0)? false: true;
+    match->moves[match->turn].state = PLAYING;
+    match->board[x][y] = ((match->turn)%2 == 0)? 'X': 'O';
 
     Session *opponent = (currentSession == match->black) ? match->white : match->black;
-
     char msg[64];
     snprintf(msg, sizeof(msg), "151 %s %d %d\r\n",
              currentSession->currentAccount->userName, x, y);
-    // send move update to opponent and to the mover so both clients update their boards
-    if (opponent->socket != -1)
-        sendMessage(opponent->socket, msg);
-    if (currentSession->socket != -1)
-        sendMessage(currentSession->socket, msg);
-
     if (checkWin(match->board, x, y, match->turn)) {
         match->finished = 1;
-
-        sendMessage(currentSession->socket, "172 You win!\r\n");
-        sendMessage(opponent->socket, "173 You lose!\r\n");
-
+        match->moves[match->turn].state = WIN;
+        pthread_mutex_lock(&mutexVar.lock);
+        while (!mutexVar.ready) {
+            pthread_cond_wait(&mutexVar.cond, &mutexVar.lock);
+        }
+        mutexVar.ready = false;
+        opponent->currentAccount->status = ONLINE;
+        currentSession->currentAccount->status = ONLINE;
+        opponent->currentAccount->score = (opponent->currentAccount->score - 3) * (opponent->currentAccount->score > 0);
+        currentSession->currentAccount->score = currentSession->currentAccount->score + 3;
+        mutexVar.ready = true;
+        pthread_cond_signal(&mutexVar.cond);
+        pthread_mutex_unlock(&mutexVar.lock);
+        memset(msg, 0, sizeof(msg));
+        snprintf(msg, sizeof(msg), "172 %s %d %d\r\n", currentSession->currentAccount->userName, x, y);
+        sendMessage(currentSession->socket, msg);
+        memset(msg, 0, sizeof(msg));
+        snprintf(msg, sizeof(msg), "173 %s %d %d\r\n", currentSession->currentAccount->userName, x, y);
+        sendMessage(opponent->socket, msg);
+        logMatch(match);
+        removeMatch(match);
         return 172;
     }
 
     if (isBoardFull(match->board)) {
         match->finished = 1;
-
-        sendMessage(match->black->socket, "174 Draw\r\n");
-        sendMessage(match->white->socket, "174 Draw\r\n");
-
+        match->moves[match->turn].state = DRAW;
+        memset(msg, 0, sizeof(msg));
+        snprintf(msg, sizeof(msg), "174 %s %d %d\r\n", currentSession->currentAccount->userName, x, y);
+        sendMessage(match->black->socket, msg);
+        sendMessage(match->white->socket, msg);
+        opponent->currentAccount->status = ONLINE;
+        currentSession->currentAccount->status = ONLINE;
+        logMatch(match);
+        removeMatch(match);
         return 174;
     }
-
-    match->turn = (match->turn == BLACK) ? WHITE : BLACK;
-
-    sendMessage(currentSession->socket, "150\r\n");
+    match->turn++;
+    sendMessage(opponent->socket, msg);
+    sendMessage(currentSession->socket, msg);
     return 150;
 }
 
 int handleRequestStop(Session *currentSession, int gameId) {
     if (!currentSession || !currentSession->currentAccount) {
-        sendMessage(currentSession->socket, "214\r\n");
-        return 214;
+        sendMessage(currentSession->socket, "221\r\n");
+        return 221;
     }
 
     Match *m = findMatchById(gameId);
@@ -524,18 +541,24 @@ int handleRequestStop(Session *currentSession, int gameId) {
     }
 
     m->finished = 1;
-
-    sendMessage(loser->socket, "170\r\n");
-
-    if (winner && winner->socket != -1) {
-        char msg[128];
-        snprintf(msg, sizeof(msg),
-                 "171 %s surrendered. You win!\r\n",
-                 loser->currentAccount->userName ? loser->currentAccount->userName : "Opponent");
-        send(winner->socket, msg, strlen(msg), 0);
+    m->moves[m->turn].isO = ((m->turn)%2 == 0)? false: true;
+    m->moves[m->turn].state = FF;
+    pthread_mutex_lock(&mutexVar.lock);
+    while (!mutexVar.ready) {
+        pthread_cond_wait(&mutexVar.cond, &mutexVar.lock);
     }
-
-    return 171;
+    mutexVar.ready = false;
+    loser->currentAccount->status = ONLINE;
+    winner->currentAccount->status = ONLINE;
+    loser->currentAccount->score = (loser->currentAccount->score - 3) * (loser->currentAccount->score > 0);
+    winner->currentAccount->score = winner->currentAccount->score + 3;
+    mutexVar.ready = true;
+    pthread_cond_signal(&mutexVar.cond);
+    pthread_mutex_unlock(&mutexVar.lock);
+    sendMessage(loser->socket, "170\r\n");
+    sendMessage(winner->socket, "171\r\n");
+    logMatch(m);
+    return 170;
 }
 
 
@@ -567,7 +590,6 @@ int process_request(char process_buffer[], Session *currentSession) {
         if (token) {
             strncpy(challenger, token, sizeof(challenger) - 1);
         }
-        printf("Opponent name: %s\n", challenger);
         if (!challenger) {
             sendMessage(currentSession->socket, "300\r\n");
             putLog(300, process_buffer, currentSession->client_addr);
@@ -666,11 +688,25 @@ void *receive_request(void *arg) {
             if (received_bytes < 0) {
                 if (errno == EINTR) continue;
                 perror("recv() error");
+                logOut(&currentSession);
+                if(currentSession.match != NULL){
+                    Session *opSession = (currentSession.match->black == &currentSession)? currentSession.match->white : currentSession.match->black;
+                    sendMessage(opSession->socket, "175\r\n");
+                    removeMatch(currentSession.match);
+                    opSession->currentAccount->status = ONLINE;
+                }
                 close(currentSession.socket);
+                removeSessionFromTable(&currentSession);
                 return NULL;
             } else if (received_bytes == 0) {
                 printf("Connection closed by client.\n");
                 logOut(&currentSession);
+                if(currentSession.match != NULL){
+                    Session *opSession = (currentSession.match->black == &currentSession)? currentSession.match->white : currentSession.match->black;
+                    sendMessage(opSession->socket, "175\r\n");
+                    removeMatch(currentSession.match);
+                    opSession->currentAccount->status = ONLINE;
+                }
                 close(currentSession.socket);
                 removeSessionFromTable(&currentSession);
                 return NULL;

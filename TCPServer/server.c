@@ -14,7 +14,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <pthread.h>
-
+#include <signal.h>
 #define BACKLOG 20
 
 extern Node* root;
@@ -22,6 +22,13 @@ extern Node* root;
  * Receive and echo message to client
  * [IN] sockfd: socket descriptor that connects to client
  */
+
+volatile sig_atomic_t keep_running = 1;
+
+
+void handle_sigint(int sig) {
+    keep_running = 0;
+}
 
 
 int main(int argc, char** argv) {
@@ -65,8 +72,13 @@ int main(int argc, char** argv) {
   
 
     printf("\nServer started at port number %d!\n", PORT);
+    struct sigaction sa;
+    sa.sa_handler = handle_sigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; 
+    sigaction(SIGINT, &sa, NULL);
 
-    while (1) {
+    while (keep_running) {
         sin_size = sizeof(struct sockaddr_in);
         if ((conn_sock = accept(listen_sock, (struct sockaddr*)&client_addr, &sin_size)) == -1) {
             if (errno == EINTR)
@@ -92,6 +104,8 @@ int main(int argc, char** argv) {
     }
 
     close(listen_sock);
+    save_accounts("account.txt");
+    freeTree(root);
     return 0;
 }
 

@@ -73,23 +73,6 @@ enum Menu{
 enum Menu menu = MAIN;
 
 volatile bool waitingStart = false; // waiting for 155 start message
-volatile bool awaitingChallengeResponse = false; // waiting for 131/132 after sending challenge
-
-void* challenge_timeout_thread(void* arg) {
-    int timeout = *(int*)arg;
-    free(arg);
-    for (int i = 0; i < timeout; i++) {
-        sleep(1);
-        if (!awaitingChallengeResponse) return NULL;
-    }
-    if (awaitingChallengeResponse) {
-        awaitingChallengeResponse = false;
-        printf("\nNo response from opponent. Returning to main menu.\n");
-        menu = MAIN;
-        fflush(stdout);
-    }
-    return NULL;
-}
 
 pthread_mutex_t resp_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t  resp_cond  = PTHREAD_COND_INITIALIZER;
@@ -190,57 +173,120 @@ void dispatch_message(char* msg, int sock)
         lastResponse = 111;
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
+        menu = MAIN;
     }
     else if (code == 110) { // Register success
+        printf("\nRegister successful\n");
         pthread_mutex_lock(&resp_mutex);
         lastResponse = 110;
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
+        menu = MAIN;
     }
-    else if (code == 211) {  // Username exists
+    else if(code == 112){
+        printf("\nLogout successful\n");
         pthread_mutex_lock(&resp_mutex);
-        lastResponse = 211;
+        lastResponse = 112;
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
+        menu = MAIN;
+    }
+    else if (code == 212) {  // Username taken
+        printf("\nUsername taken\n");
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 212;
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
+        menu = MAIN;
     }
     else if (code == 213) {  // Already logged in
+        printf("\nAlready logged in\n");
         pthread_mutex_lock(&resp_mutex);
         lastResponse = 213;
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
+        menu = MAIN;
     }
     else if (code == 215) {  // Login failed
+        printf("\nLogin failed. Wrong username or password\n");
         pthread_mutex_lock(&resp_mutex);
         lastResponse = 215;
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
+        menu = MAIN;
+    }
+    else if (code == 221) {  // Login failed
+        printf("\nNot logged in\n");
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 221;
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
+        menu = MAIN;
     }
     else if (code == 130) {
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 130;
         printf("\nChallenge sent successfully\nWaiting for opponent...\n");
-        // enter waiting state and start timeout
-        awaitingChallengeResponse = true;
-        int *ptime = malloc(sizeof(int));
-        *ptime = 20; // seconds
-        pthread_t tid;
-        if (pthread_create(&tid, NULL, challenge_timeout_thread, ptime) == 0) {
-            pthread_detach(tid);
-        } else {
-            free(ptime);
-        }
+        menu = CHALLENGE;
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
     }
     else if (code == 131) {
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 131;
         printf("\nChallenge accepted! Game starting ...\n");
         waitingStart = true;
-        awaitingChallengeResponse = false;
+    ;
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
     }
     else if (code == 132) {
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 132;
         printf("\nChallenge rejected\n");
         menu = MAIN;
-        awaitingChallengeResponse = false;
+    ;
+        bzero(challenger, sizeof(challenger));
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
+    }
+    else if (code == 230) {
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 230;
+        printf("\nNo online user with that username\n");
+        menu = MAIN;
+        bzero(challenger, sizeof(challenger));
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
+    }
+    else if (code == 231) {
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 231;
+        printf("\nThat user is currently busy\n");
+        menu = MAIN;
+        bzero(challenger, sizeof(challenger));
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
+    }
+    else if (code == 232) {
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 232;
+        int myScore, opScore;
+        sscanf(msg, "232 %d %d\r\n", &myScore, &opScore);
+        printf("\nGap over 10 points!\nYour score: %d\nOpponent score: %d\n", myScore, opScore);
+        menu = MAIN;
+        bzero(challenger, sizeof(challenger));
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
     }
     else if (code == 233) {
+        pthread_mutex_lock(&resp_mutex);
+        lastResponse = 233;
         printf("\nNo challenge exists\n");
         menu = MAIN;
+        bzero(challenger, sizeof(challenger));
+        pthread_cond_signal(&resp_cond);
+        pthread_mutex_unlock(&resp_mutex);
     }
     else if (code == 140) {  
         if (challengePending){
@@ -302,55 +348,55 @@ void dispatch_message(char* msg, int sock)
         printf("Game started: %s (X) vs %s (O)\n", black, white);
         waitingStart = false;
         menu = GAME;
+        printClientBoard(currentMatch);
+        playerMove(sock);
         fflush(stdout);
     }
 
-    else if (code == 150) {
-        printf("\nYour move accepted!\n");
-        fflush(stdout);
-    }
-    else if (code == 172) {
-        printf("\nYou win!\n");
-        if (currentMatch) currentMatch->finished = 1;
-        menu = MAIN;
-        fflush(stdout);
-    }
-    else if (code == 173) {
-        printf("\nYou lose!\n");
-        if (currentMatch) currentMatch->finished = 1;
-        menu = MAIN;
-        fflush(stdout);
-    }
-    else if (code == 174) {
-        printf("\nDraw\n");
-        if (currentMatch) currentMatch->finished = 1;
-        menu = MAIN;
-        fflush(stdout);
-    }
-    
-    else if (code == 151) {
+    else if (code == 151 || code == 172 || code == 173 || code == 174) {
         char playerName[32];
-        int x, y;
+        int x, y, cmd;
 
-        if (sscanf(msg, "151 %s %d %d", playerName, &x, &y) == 3) {
+        if (sscanf(msg, "%d %s %d %d", &cmd, playerName, &x, &y) == 4) {
             if (currentMatch == NULL) return;
             char symbol = (strcmp(playerName, currentMatch->blackName) == 0) ? 'X' : 'O';
-
             if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE)
                 currentMatch->board[x][y] = symbol;
-
-            printf("\n>>> %s (%c) played at [%d, %d]\n", playerName, symbol, x, y);
             currentMatch->turn = (currentMatch->turn == BLACK) ? WHITE : BLACK;
-
             printClientBoard(currentMatch);
-
             char* currentPlayer = (currentMatch->turn == BLACK)
                                     ? currentMatch->blackName
                                     : currentMatch->whiteName;
-
-            printf("\nCurrent turn: %s (%c)\n", currentPlayer,
-                (currentMatch->turn == BLACK) ? 'X' : 'O');
-            fflush(stdout);
+            switch (cmd)
+            {
+            case 151:
+                playerMove(sock);
+                fflush(stdout);
+                break;
+            case 172:
+                printf("\nYou win!\n");
+                if (currentMatch) currentMatch->finished = 1;
+                menu = MAIN;
+                bzero(challenger, sizeof(challenger));
+                fflush(stdout);
+                break;
+            case 173:
+                printf("\nYou lose!\n");
+                if (currentMatch) currentMatch->finished = 1;
+                menu = MAIN;
+                bzero(challenger, sizeof(challenger));
+                fflush(stdout);
+                break;
+            case 174:
+                printf("\nDraw\n");
+                if (currentMatch) currentMatch->finished = 1;
+                menu = MAIN;
+                bzero(challenger, sizeof(challenger));
+                fflush(stdout);
+                break;
+            default:
+                break;
+            }                        
         }
     }
 
@@ -363,11 +409,13 @@ void dispatch_message(char* msg, int sock)
     
     else if (code == 251) {
         printf("\nPosition already occupied!\n");
+        playerMove(sock);
         fflush(stdout);
     }
     
     else if (code == 252) {
         printf("\nInvalid position (out of bounds)!\n");
+        playerMove(sock);
         fflush(stdout);
     }
 
@@ -379,6 +427,7 @@ void dispatch_message(char* msg, int sock)
         }
 
         menu = MAIN;
+        bzero(challenger, sizeof(challenger));
         fflush(stdout);
     }
     else if (code == 171) {
@@ -394,12 +443,38 @@ void dispatch_message(char* msg, int sock)
         }
 
         menu = MAIN;
+        bzero(challenger, sizeof(challenger));
         fflush(stdout);
     }
-
     
+    else if (code == 175){
+        printf("\nOpponent disconnected. Game ended!\n");
+        menu = MAIN;
+        bzero(challenger, sizeof(challenger));
+        fflush(stdout);
+    }
+    else if (code == 180){
+        char *saveptr;
+        char *cmd = strtok_r(msg, " ", &saveptr);      
+        char *filename = strtok_r(NULL, " ", &saveptr); 
+        char *content = strtok_r(NULL, "", &saveptr);   
+
+        if (!cmd || !filename || !content) {
+            // error handling
+            return;
+        }
+
+        FILE *f = fopen(filename, "w");
+        if (!f) {
+            perror("fopen");
+            return;
+        }
+
+        fprintf(f, "%s", content);
+        fclose(f);
+
+    }
     else if (code == 300) {
-        printf("\nsai kiểu thông điệp\n");
         if (currentMatch) {
             free(currentMatch);
             currentMatch = NULL;
@@ -421,30 +496,40 @@ void dispatch_message(char* msg, int sock)
 }
 
 
+
 void showChallengeMenu(int sock) {
     int choice;
     char msg[256];
-    if (challenger == NULL) return;
+    if (challenger == NULL || strlen(challenger) <= 0){
+        printf("You have no pending challenge\n");
+        return;
+    }
     printf("\nYou are challenged by %s\n", challenger);
     printf("1. Accept challenge\n");
     printf("2. Reject challenge\n");
-    printf("Your choice: ");
-    scanf("%d", &choice);
-    getchar();
+    while (choice != 1 && choice !=2)
+    {
+        printf("Your choice: ");
+        scanf("%d", &choice);
+        getchar();
 
-    if (choice == 1) {
-        snprintf(msg, sizeof(msg),
-                 "CHALLENGE_RESP %s ACCEPT\r\n", challenger);
-        send(sock, msg, strlen(msg), 0);
+        if (choice == 1) {
+            snprintf(msg, sizeof(msg),
+                    "CHALLENGE_RESP %s ACCEPT\r\n", challenger);
+            send(sock, msg, strlen(msg), 0);
+        }
+        else if (choice == 2) {
+            snprintf(msg, sizeof(msg),
+                    "CHALLENGE_RESP %s REJECT\r\n", challenger);
+            send(sock, msg, strlen(msg), 0);
+        }
+        else {
+            printf("Invalid choice.\n");
+        }
     }
-    else if (choice == 2) {
-        snprintf(msg, sizeof(msg),
-                 "CHALLENGE_RESP %s REJECT\r\n", challenger);
-        send(sock, msg, strlen(msg), 0);
-    }
-    else {
-        printf("Invalid choice.\n");
-    }
+    while(lastResponse != 221 && lastResponse != 230 && lastResponse != 231 && lastResponse != 232 && lastResponse != 233 && lastResponse != 300 && lastResponse != 131 && lastResponse != 132){}
+    
+    
 }
 /**
  * @brief Sends login request to server and handles response.
@@ -469,30 +554,11 @@ int logIn(int socketFd) {
 
     sendMessage(socketFd, buffer, input, 0);
     printf("Login request sent. Waiting response...\n");
-
-    pthread_mutex_lock(&resp_mutex);
-    while (lastResponse == -1)
-        pthread_cond_wait(&resp_cond, &resp_mutex);
-
-    int res = lastResponse;
-    lastResponse = -1;
-    pthread_mutex_unlock(&resp_mutex);
-
-    switch (res) {
-        case 111:
-            printf("Hello %s!\n", userName);
-            break;
-        case 213:
-            printf("Already logged in.\n");
-            break;
-        case 215:
-            printf("Login failed.\n");
-            break;
-        default:
-            printf("Server response: %d\n", res);
+    while (lastResponse != 111 && lastResponse != 213 && lastResponse != 300 && lastResponse != 215)
+    {
     }
-    menu = MAIN;
-    return res;
+    
+    return 0;
 }
 
 
@@ -512,6 +578,9 @@ int logOut(int socketFd) {
     }
 
     printf("Logout request sent. Waiting for server response...\n");
+    while (lastResponse != 112 && lastResponse != 221 && lastResponse != 300)
+    {
+    }
     return 0;   
 }
 
@@ -546,6 +615,12 @@ int challengePlayer(int socketFd) {
     }
 
     printf("Challenge request sent to %s!\n", opponent);
+    strcpy(challenger, opponent);
+    while (lastResponse != 221 && lastResponse != 230 && lastResponse != 231 && lastResponse != 232 && lastResponse != 130 && lastResponse != 300)
+    {
+        /* code */
+    }
+    
     return 0;
 }
 
@@ -568,15 +643,47 @@ int signUp(int socketFd) {
 
     sendMessage(socketFd, buffer, msg, 2);
 
-    int res = waitResponse();
-
-    if (res == 110) printf("Register success\n");
-    else if (res == 211) printf("Username exists\n");
-    else printf("Server code: %d\n", res);
-
-    return res;
+    printf("Signup request sent. Waiting response...\n");
+    while (lastResponse != 110 && lastResponse != 211 && lastResponse != 212 && lastResponse != 213 && lastResponse != 300)
+    {
+    }
+    
+    return 0;
 }
 
+void playerMove(int socketFd){
+    bool isO = (strcmp(currentMatch->whiteName, challenger) == 0)? false: true;
+    if((currentMatch->turn == 'O' && isO) || (currentMatch->turn == 'X' && !isO)){
+            printf("\nYour move (row col) or 'surrender': ");
+            fflush(stdout);
+            char input[128];
+            if (fgets(input, sizeof(input), stdin) == NULL) return;
+            input[strcspn(input, "\n")] = 0;
+            if (strlen(input) == 0) return;
+            if (strcasecmp(input, "surrender") == 0) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "REQUEST_STOP %d\r\n", currentMatch->game_id);
+                send(socketFd, msg, strlen(msg), 0);
+                printf("\nSent surrender request. Waiting for server...\n");
+                return;
+            }
+            int x, y;
+            while (sscanf(input, "%d %d", &x, &y) != 2) {
+                printf("Invalid format! Use: row col\n");
+            }
+
+
+            char msg[128];
+            snprintf(msg, sizeof(msg), "MOVE %d %d %d\r\n",
+                    currentMatch->game_id, x, y);
+            send(socketFd, msg, strlen(msg), 0);
+            
+        }
+    else{
+        printf("\nOpponent turn\n");
+        fflush(stdout);
+    }
+}
 bool quitFlag = false;
 
 
@@ -655,7 +762,10 @@ void showMenu(int socketFd) {
         }
 
         case CHALLENGE:
-            printf("Waiting for challenge response...\n");
+            while (lastResponse != 131 && lastResponse!= 132 && lastResponse!= 300 && lastResponse != 230 && lastResponse != 231 && lastResponse != 232 && lastResponse != 233)
+            {
+            }
+            
             break;
 
         case GAME:
@@ -667,44 +777,6 @@ void showMenu(int socketFd) {
             if (currentMatch == NULL || currentMatch->finished) {
                 menu = MAIN;
                 break;
-            }
-
-            printClientBoard(currentMatch);
-
-            printf("\nYour move (row col) or 'surrender': ");
-            fflush(stdout);
-
-            char input[128];
-            if (fgets(input, sizeof(input), stdin) == NULL) break;
-
-            input[strcspn(input, "\n")] = 0;
-            if (strlen(input) == 0) break;
-
-            if (strcasecmp(input, "surrender") == 0) {
-                char msg[64];
-                snprintf(msg, sizeof(msg), "REQUEST_STOP %d\r\n", currentMatch->game_id);
-                send(socketFd, msg, strlen(msg), 0);
-                printf("\nSent REQUEST_STOP\n");
-                break;
-            }
-
-
-            int x, y;
-            if (sscanf(input, "%d %d", &x, &y) == 2) {
-                char msg[128];
-                snprintf(msg, sizeof(msg), "MOVE %d %d %d\r\n",
-                        currentMatch->game_id, x, y);
-                send(socketFd, msg, strlen(msg), 0);
-                printf("Move sent: [%d, %d]\n", x, y);
-                if (currentMatch != NULL) {
-                    if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE) {
-                        currentMatch->board[x][y] = currentMatch->turn;
-                    }
-                    printClientBoard(currentMatch);
-                    fflush(stdout);
-                }
-            } else {
-                printf("Invalid format! Use: row col (e.g., 7 7)\n");
             }
             break;
     }

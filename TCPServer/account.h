@@ -43,7 +43,7 @@ Node *root;
 
 
 /**
- * @brief Create a new BST node with account data.
+ * @brief Create a new BST r with account data.
  *
  * @param userName A pointer to the username string.
  * @param status   Account status ( 1 = active, 0 = banned).
@@ -65,13 +65,13 @@ Node* createNode(char* userName, char *password, int score) {
 /**
  * @brief Insert an account into the binary search tree.
  *
- * If the username already exists, no new node is inserted.
+ * If the username already exists, no new r is inserted.
  *
  * @param r        Root of the BST.
  * @param userName A pointer to the username string.
  * @param status   Account status.
  *
- * @return A pointer to the root node of the updated BST.
+ * @return A pointer to the root r of the updated BST.
  */
 Node* insert(Node* r, char* userName, char* password, int score) {
     if (r == NULL){ 
@@ -93,7 +93,7 @@ Node* insert(Node* r, char* userName, char* password, int score) {
 
 
 /**
- * @brief Find an account node in the BST by username.
+ * @brief Find an account r in the BST by username.
  *
  * @param r        Root of the BST.
  * @param userName A pointer to the username string.
@@ -171,6 +171,41 @@ int collectReadyUsers(Node* root,
  *
  * @param r Root of the BST.
  */
+
+void save_account_node(FILE *f, Node *r) {
+    if (r == NULL) return;
+
+    save_account_node(f, r->left);
+
+    fprintf(f, "%s %s %d\n",
+            r->account.userName,
+            r->account.password,
+            r->account.score);
+    save_account_node(f, r->right);
+}
+
+void save_accounts(const char *filename) {
+    pthread_mutex_lock(&mutexVar.lock);
+    while (!mutexVar.ready) {
+        pthread_cond_wait(&mutexVar.cond, &mutexVar.lock);
+    }
+    mutexVar.ready = false;
+    FILE *f = fopen(filename, "w");
+    if (!f) {
+        perror("fopen");
+        pthread_mutex_unlock(&mutexVar.lock);
+        return;
+    }
+
+    save_account_node(f, root);
+
+    fclose(f);
+    mutexVar.ready = true;
+    pthread_cond_signal(&mutexVar.cond);
+    pthread_mutex_unlock(&mutexVar.lock);
+
+}
+
 
 void freeTree(Node* r) {
     if (r == NULL) return;

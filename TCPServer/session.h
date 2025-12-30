@@ -108,8 +108,6 @@ int getSessionByUsername(char username[])
     sessionTableMutex.ready = true;
     pthread_cond_signal(&sessionTableMutex.cond);
     pthread_mutex_unlock(&sessionTableMutex.lock);
-
-    printf("Get session by username: %s\n", username);
     return res;   // NULL if not found (SAFE)
 }
 
