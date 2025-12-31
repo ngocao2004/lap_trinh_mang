@@ -18,6 +18,9 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <sys/select.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #define BOARD_SIZE 10
 #define BLACK 'X'
@@ -348,6 +351,8 @@ void dispatch_message(char* msg, int sock)
         printf("Game started: %s (X) vs %s (O)\n", black, white);
         waitingStart = false;
         menu = GAME;
+        /* flush any leftover stdin before the first prompt */
+        flush_stdin();
         printClientBoard(currentMatch);
         playerMove(sock);
         fflush(stdout);
@@ -357,12 +362,15 @@ void dispatch_message(char* msg, int sock)
         char playerName[32];
         int x, y, cmd;
 
-        if (sscanf(msg, "%d %s %d %d", &cmd, playerName, &x, &y) == 4) {
+            if (sscanf(msg, "%d %s %d %d", &cmd, playerName, &x, &y) == 4) {
             if (currentMatch == NULL) return;
             char symbol = (strcmp(playerName, currentMatch->blackName) == 0) ? 'X' : 'O';
             if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE)
                 currentMatch->board[x][y] = symbol;
+            /* turn changed -> flush any leftover stdin so fgets won't pick
+               up stale input */
             currentMatch->turn = (currentMatch->turn == BLACK) ? WHITE : BLACK;
+            flush_stdin();
             printClientBoard(currentMatch);
             switch (cmd)
             {
@@ -767,4 +775,31 @@ void showMenu(int socketFd) {
             break;
         }
     }
+}
+
+/* Clear any pending stdin input without blocking. Uses tcflush when
+   available, otherwise uses select+getchar loop. On Windows uses
+   FlushConsoleInputBuffer. */
+void flush_stdin(void) {
+#ifdef _WIN32
+    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    if (h != INVALID_HANDLE_VALUE) FlushConsoleInputBuffer(h);
+#else
+#if defined(TCIFLUSH)
+    tcflush(STDIN_FILENO, TCIFLUSH);
+#else
+    fd_set rfds;
+    struct timeval tv;
+    int c;
+    while (1) {
+        FD_ZERO(&rfds);
+        FD_SET(STDIN_FILENO, &rfds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 0;
+        int r = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
+        if (r <= 0) break;
+        while ((c = getchar()) != '\n' && c != EOF);
+    }
+#endif
+#endif
 }

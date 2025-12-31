@@ -1,0 +1,6 @@
+2025-12-31_14-47-21 binh(X) vs cao(O)
+X 5 5
+O 7 7
+X 8 8
+O 2 2
+X SURRENDERED

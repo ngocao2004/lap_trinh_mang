@@ -700,9 +700,14 @@ void *receive_request(void *arg) {
                 pthread_mutex_unlock(&mutexVar.lock);
                 if(currentSession.match != NULL){
                     Session *opSession = (currentSession.match->black == &currentSession)? currentSession.match->white : currentSession.match->black;
-                    sendMessage(opSession->socket, "175\r\n");
+                    /* Only notify opponent about disconnection if the match
+                       wasn't already finished (prevents post-game 'disconnected' notices). */
+                    if (currentSession.match->finished == 0) {
+                        sendMessage(opSession->socket, "175\r\n");
+                    }
                     removeMatch(currentSession.match);
-                    opSession->currentAccount->status = ONLINE;
+                    if (opSession && opSession->currentAccount)
+                        opSession->currentAccount->status = ONLINE;
                 }
                 close(currentSession.socket);
                 removeSessionFromTable(&currentSession);
@@ -721,10 +726,13 @@ void *receive_request(void *arg) {
                 pthread_cond_signal(&mutexVar.cond);
                 pthread_mutex_unlock(&mutexVar.lock);
                 if(currentSession.match != NULL){
-                    Session *opSession = (currentSession.match->black == &currentSession)? currentSession.match->white : currentSession.match->black;
-                    sendMessage(opSession->socket, "175\r\n");
-                    removeMatch(currentSession.match);
-                    opSession->currentAccount->status = ONLINE;
+                        Session *opSession = (currentSession.match->black == &currentSession)? currentSession.match->white : currentSession.match->black;
+                        if (currentSession.match->finished == 0) {
+                            sendMessage(opSession->socket, "175\r\n");
+                        }
+                        removeMatch(currentSession.match);
+                        if (opSession && opSession->currentAccount)
+                            opSession->currentAccount->status = ONLINE;
                 }
                 close(currentSession.socket);
                 removeSessionFromTable(&currentSession);
