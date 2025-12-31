@@ -82,20 +82,9 @@ const char* responseCode[2] = {"+OK", "-ERR"};
 const char* commandPrefix[6] = {"LOGIN ","LOGOUT", "REGISTER ","GET_READY_LIST","CHALLENGE ","CHALLENGE_RESP "};
 char buffer[BUFF_SIZE];
 
-enum Menu{
-	MAIN,
-	CHALLENGE,
-	LOGIN,
-	LOGOUT,
-	REGISTER,
-	LIST,
-	INVITED,
-    GAME
-};
 
-enum Menu menu = MAIN;
 
-int sendMessage(int socketFd, char buffer[], const char *input, int type) {
+int sendMessage(int socketFd, const char *input, int type) {
     const char *prefix_str = commandPrefix[type];
     const char *end_marker = "\r\n";
 
@@ -238,16 +227,16 @@ void dispatch_message(char* msg, int sock)
         pthread_mutex_lock(&resp_mutex);
         lastResponse = 130;
         printf("\nChallenge sent successfully\nWaiting for opponent...\n");
-        menu = CHALLENGE;
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
+        menu = CHALLENGE;
     }
     else if (code == 131) {
         pthread_mutex_lock(&resp_mutex);
         lastResponse = 131;
         printf("\nChallenge accepted! Game starting ...\n");
         waitingStart = true;
-    ;
+        menu = GAME;
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
     }
@@ -375,9 +364,6 @@ void dispatch_message(char* msg, int sock)
                 currentMatch->board[x][y] = symbol;
             currentMatch->turn = (currentMatch->turn == BLACK) ? WHITE : BLACK;
             printClientBoard(currentMatch);
-            char* currentPlayer = (currentMatch->turn == BLACK)
-                                    ? currentMatch->blackName
-                                    : currentMatch->whiteName;
             switch (cmd)
             {
             case 151:
@@ -498,7 +484,7 @@ void dispatch_message(char* msg, int sock)
 
 
     else if (strncmp(msg, "CHALLENGE ", 10) == 0) {
-        sscanf(msg, "CHALLENGE %s", challenger);
+        if(strlen(challenger) <= 0) sscanf(msg, "CHALLENGE %s", challenger);
     }
     else {
         printf("\n[Server] %s\n", msg);
@@ -511,7 +497,7 @@ void dispatch_message(char* msg, int sock)
 void showChallengeMenu(int sock) {
     int choice;
     char msg[256];
-    if (challenger == NULL || strlen(challenger) <= 0){
+    if (strlen(challenger) <= 0){
         printf("You have no pending challenge\n");
         return;
     }
@@ -549,13 +535,19 @@ void showChallengeMenu(int sock) {
  */
 int logIn(int socketFd) {
     if (menu != MAIN) return -1;
-    char userName[100];
-    char password[100];
+    char userName[100] = {0};
+    char password[100] = {0};
     menu = LOGIN;
     printf("\nUsername: ");
-    fgets(userName, sizeof(userName), stdin);
-    printf("Password: ");
-    fgets(password, sizeof(password), stdin);
+    while (strlen(userName) <=0 )
+    {
+        fgets(userName, sizeof(userName), stdin);
+    }
+    printf("\nPassword: ");
+    while (strlen(password) <=0 )
+    {
+        fgets(password, sizeof(password), stdin);
+    }
 
     userName[strcspn(userName, "\n")] = 0;
     password[strcspn(password, "\n")] = 0;
@@ -563,7 +555,7 @@ int logIn(int socketFd) {
     char input[256];
     snprintf(input, sizeof(input), "%s %s", userName, password);
 
-    sendMessage(socketFd, buffer, input, 0);
+    sendMessage(socketFd, input, 0);
     printf("Login request sent. Waiting response...\n");
     while (lastResponse != 111 && lastResponse != 213 && lastResponse != 300 && lastResponse != 215)
     {
@@ -583,7 +575,7 @@ int logIn(int socketFd) {
 int logOut(int socketFd) {
     if (menu != MAIN) return -1;
     menu = LOGOUT;
-    if (sendMessage(socketFd, buffer, "", 1) == -1) {
+    if (sendMessage(socketFd, "", 1) == -1) {
         printf("Send LOGOUT failed\n");
         return -1;
     }
@@ -600,7 +592,7 @@ int getReadyList(int socketFd)
 {   
     if (menu != MAIN) return -1;
     menu = LIST;
-    if (sendMessage(socketFd, buffer, "", 3) == -1) {
+    if (sendMessage(socketFd, "", 3) == -1) {
         printf("Failed to send GET_READY_LIST\n");
         return -1;
     }
@@ -616,18 +608,18 @@ int getReadyList(int socketFd)
 int challengePlayer(int socketFd) {
     if (menu != MAIN) return -1;
     char opponent[256];
-
+    menu = CHALLENGE;
     printf("\nEnter username to challenge: ");
     fgets(opponent, sizeof(opponent), stdin);
     opponent[strcspn(opponent, "\n")] = 0;
-    if (sendMessage(socketFd, buffer, opponent, 4) == -1) {
+    if (sendMessage(socketFd, opponent, 4) == -1) {
         printf("Send challenge failed\n");
         return -1;
     }
 
     printf("Challenge request sent to %s!\n", opponent);
     strcpy(challenger, opponent);
-    while (lastResponse != 221 && lastResponse != 230 && lastResponse != 231 && lastResponse != 232 && lastResponse != 130 && lastResponse != 300)
+    while (lastResponse != 221 && lastResponse != 230 && lastResponse != 231 && lastResponse != 232 && lastResponse != 300 &&  lastResponse != 130)
     {
         /* code */
     }
@@ -652,7 +644,7 @@ int signUp(int socketFd) {
     char msg[2000];
     snprintf(msg, sizeof(msg), "%s %s", user, pass);
 
-    sendMessage(socketFd, buffer, msg, 2);
+    sendMessage(socketFd, msg, 2);
 
     printf("Signup request sent. Waiting response...\n");
     while (lastResponse != 110 && lastResponse != 211 && lastResponse != 212 && lastResponse != 213 && lastResponse != 300)
@@ -716,8 +708,25 @@ void quit() {
  */
 
 void showMenu(int socketFd) {
-
+    sleep(1);
     switch (menu) {
+        case CHALLENGE:
+            while (lastResponse != 131 && lastResponse!= 132 && lastResponse!= 300 && lastResponse != 230 && lastResponse != 231 && lastResponse != 232 && lastResponse != 233)
+            {
+            }
+            
+            break;
+
+        case GAME:
+            if (waitingStart) {
+                break;
+            }
+
+            if (currentMatch == NULL || currentMatch->finished) {
+                menu = MAIN;
+                break;
+            }
+            break;
         case MAIN: {
             printf("\nMenu:\n"
                    "1. Log in\n"
@@ -728,32 +737,17 @@ void showMenu(int socketFd) {
                    "6. See challenge(%d)\n"
                    "7. Quit\n", challengePending);
             int choice = -1;
-            char line[128];
-            printf("Your choice: ");
-            fflush(stdout);
-
-            // Wait for user input but allow interruption by other threads
-            while (menu == MAIN) {
-                fd_set readfds;
-                struct timeval tv;
-                FD_ZERO(&readfds);
-                FD_SET(0, &readfds); // stdin
-                tv.tv_sec = 1;
-                tv.tv_usec = 0;
-                int rv = select(1, &readfds, NULL, NULL, &tv);
-                if (rv > 0) {
-                    if (fgets(line, sizeof(line), stdin) == NULL) break;
-                    if (sscanf(line, "%d", &choice) == 1) break;
-                    printf("Please choose from 1 to 7!\n");
-                    printf("Your choice: ");
-                    fflush(stdout);
-                } else if (rv == 0) {
-                    if (menu != MAIN) break; // interrupted by network thread
-                    continue;
-                } else {
-                    break; // error
+            while (choice <= 0 || choice >7)
+            {
+               printf("Your choice: ");
+               char line[128];
+               if (fgets(line, sizeof(line), stdin)) {
+                    choice = atoi(line);
                 }
             }
+            
+            fflush(stdout);
+
 
             if (menu != MAIN) break;
 
@@ -768,55 +762,9 @@ void showMenu(int socketFd) {
                 case 6: showChallengeMenu(socketFd);
                 break;
                 case 7: quit(); break;
-                default: printf("\nPlease choose from 1 to 7!"); break;
+                default:  break;
             }
             break;
         }
-
-        case CHALLENGE:
-            while (lastResponse != 131 && lastResponse!= 132 && lastResponse!= 300 && lastResponse != 230 && lastResponse != 231 && lastResponse != 232 && lastResponse != 233)
-            {
-            }
-            
-            break;
-
-        case GAME:
-            if (waitingStart) {
-                printf("Waiting for game to start...\n");
-                break;
-            }
-
-            if (currentMatch == NULL || currentMatch->finished) {
-                menu = MAIN;
-                break;
-            }
-            break;
-    }
-    switch (menu){
-        case MAIN:
-            printf("\nMenu:\n1. Log in\n2. Log out\n3. Register \n4. Get ready list\n5. Challenge a player\n6. See challenge(%d)\n7.Quit\n", challengePending);
-            int choice;
-            printf("Your choice: ");
-            scanf("%d", &choice);
-            getchar(); 
-            switch (choice) {
-                case 1: logIn(socketFd); break;
-                case 2: logOut(socketFd); break;
-                case 3: signUp(socketFd); break;
-                case 4: getReadyList(socketFd); break;
-                case 5: challengePlayer(socketFd); break;
-                case 6: showChallengeMenu(socketFd); break; 
-                case 7: quit();     
-                default: printf("\nPlease choose from 1 to 7!"); break;
-                }
-            break;
-        case CHALLENGE:
-            printf("Waiting for challenge response...");
-            break;
-        case GAME:
-            printf("Game in progress...");
-            break;
-
-             
     }
 }
