@@ -18,6 +18,7 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <sys/select.h>
+#include <termios.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -249,7 +250,7 @@ void dispatch_message(char* msg, int sock)
         printf("\nChallenge rejected\n");
         menu = MAIN;
     ;
-        bzero(challenger, sizeof(challenger));
+        memset(challenger, 0, sizeof(challenger));
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
     }
@@ -258,7 +259,7 @@ void dispatch_message(char* msg, int sock)
         lastResponse = 230;
         printf("\nNo online user with that username\n");
         menu = MAIN;
-        bzero(challenger, sizeof(challenger));
+        memset(challenger, 0, sizeof(challenger));
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
     }
@@ -267,7 +268,7 @@ void dispatch_message(char* msg, int sock)
         lastResponse = 231;
         printf("\nThat user is currently busy\n");
         menu = MAIN;
-        bzero(challenger, sizeof(challenger));
+        memset(challenger, 0, sizeof(challenger));
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
     }
@@ -278,7 +279,7 @@ void dispatch_message(char* msg, int sock)
         sscanf(msg, "232 %d %d\r\n", &myScore, &opScore);
         printf("\nGap over 10 points!\nYour score: %d\nOpponent score: %d\n", myScore, opScore);
         menu = MAIN;
-        bzero(challenger, sizeof(challenger));
+        memset(challenger, 0, sizeof(challenger));
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
     }
@@ -287,7 +288,7 @@ void dispatch_message(char* msg, int sock)
         lastResponse = 233;
         printf("\nNo challenge exists\n");
         menu = MAIN;
-        bzero(challenger, sizeof(challenger));
+        memset(challenger, 0, sizeof(challenger));
         pthread_cond_signal(&resp_cond);
         pthread_mutex_unlock(&resp_mutex);
     }
@@ -379,21 +380,21 @@ void dispatch_message(char* msg, int sock)
                 printf("\nYou win!\n");
                 if (currentMatch) currentMatch->finished = 1;
                 menu = MAIN;
-                bzero(challenger, sizeof(challenger));
+                memset(challenger, 0, sizeof(challenger));
                 fflush(stdout);
                 break;
             case 173:
                 printf("\nYou lose!\n");
                 if (currentMatch) currentMatch->finished = 1;
                 menu = MAIN;
-                bzero(challenger, sizeof(challenger));
+                memset(challenger, 0, sizeof(challenger));
                 fflush(stdout);
                 break;
             case 174:
                 printf("\nDraw\n");
                 if (currentMatch) currentMatch->finished = 1;
                 menu = MAIN;
-                bzero(challenger, sizeof(challenger));
+                memset(challenger, 0, sizeof(challenger));
                 fflush(stdout);
                 break;
             default:
@@ -429,7 +430,7 @@ void dispatch_message(char* msg, int sock)
         }
 
         menu = MAIN;
-        bzero(challenger, sizeof(challenger));
+        memset(challenger, 0, sizeof(challenger));
         fflush(stdout);
     }
     else if (code == 171) {
@@ -445,14 +446,14 @@ void dispatch_message(char* msg, int sock)
         }
 
         menu = MAIN;
-        bzero(challenger, sizeof(challenger));
+        memset(challenger, 0, sizeof(challenger));
         fflush(stdout);
     }
     
     else if (code == 175){
         printf("\nOpponent disconnected. Game ended!\n");
         menu = MAIN;
-        bzero(challenger, sizeof(challenger));
+        memset(challenger, 0, sizeof(challenger));
         fflush(stdout);
     }
     else if (code == 180){

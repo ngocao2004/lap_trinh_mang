@@ -222,11 +222,11 @@ void logMatch(Match *m){
         perror("Error in sending file.");
         return;
     }
-    bzero(fileBuffer, sizeof(fileBuffer));
+    memset(fileBuffer, 0, sizeof(fileBuffer));
 
     while(fgets(fileBuffer, 1024, f) != NULL){
         if (send(m->black->socket, fileBuffer, strlen(fileBuffer), 0) >= 0 && send(m->white->socket, fileBuffer, strlen(fileBuffer), 0) >= 0 ) {
-            bzero(fileBuffer, sizeof(fileBuffer));
+            memset(fileBuffer, 0, sizeof(fileBuffer));
             continue;
         }
         fclose(f);
