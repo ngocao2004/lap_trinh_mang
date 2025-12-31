@@ -344,14 +344,13 @@ void dispatch_message(char* msg, int sock)
         strncpy(currentMatch->whiteName, white, sizeof(currentMatch->whiteName)-1);
         currentMatch->turn = BLACK;
         currentMatch->finished = 0;
-        // initialize board to EMPTY ('.')
         for (int i = 0; i < BOARD_SIZE; i++)
             for (int j = 0; j < BOARD_SIZE; j++)
                 currentMatch->board[i][j] = EMPTY;
         printf("Game started: %s (X) vs %s (O)\n", black, white);
         waitingStart = false;
         menu = GAME;
-        /* flush any leftover stdin before the first prompt */
+
         flush_stdin();
         printClientBoard(currentMatch);
         playerMove(sock);
@@ -367,8 +366,6 @@ void dispatch_message(char* msg, int sock)
             char symbol = (strcmp(playerName, currentMatch->blackName) == 0) ? 'X' : 'O';
             if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE)
                 currentMatch->board[x][y] = symbol;
-            /* turn changed -> flush any leftover stdin so fgets won't pick
-               up stale input */
             currentMatch->turn = (currentMatch->turn == BLACK) ? WHITE : BLACK;
             flush_stdin();
             printClientBoard(currentMatch);
@@ -777,9 +774,7 @@ void showMenu(int socketFd) {
     }
 }
 
-/* Clear any pending stdin input without blocking. Uses tcflush when
-   available, otherwise uses select+getchar loop. On Windows uses
-   FlushConsoleInputBuffer. */
+
 void flush_stdin(void) {
 #ifdef _WIN32
     HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
