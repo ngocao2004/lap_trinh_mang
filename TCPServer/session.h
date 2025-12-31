@@ -96,9 +96,8 @@ int getSessionByUsername(char username[])
     for (int i = 0; i < sessionCount; i++) {
        
         if (
-            sessionTable[i] &&
-            sessionTable[i]->currentAccount &&
-            sessionTable[i]->currentAccount->userName &&
+            sessionTable[i] != NULL &&
+            sessionTable[i]->currentAccount != NULL &&
             strcmp(sessionTable[i]->currentAccount->userName, username) == 0) {
             res = i;
             break;
