@@ -1,5 +1,5 @@
 abc 123 111
 abcd 123 100
 binh 123 94
-cao 123 103
-tuan 123 103
+cao 123 100
+tuan 123 106
