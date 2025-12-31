@@ -776,25 +776,25 @@ void showMenu(int socketFd) {
 
 
 void flush_stdin(void) {
-#ifdef _WIN32
-    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
-    if (h != INVALID_HANDLE_VALUE) FlushConsoleInputBuffer(h);
-#else
-#if defined(TCIFLUSH)
-    tcflush(STDIN_FILENO, TCIFLUSH);
-#else
-    fd_set rfds;
-    struct timeval tv;
-    int c;
-    while (1) {
-        FD_ZERO(&rfds);
-        FD_SET(STDIN_FILENO, &rfds);
-        tv.tv_sec = 0;
-        tv.tv_usec = 0;
-        int r = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
-        if (r <= 0) break;
-        while ((c = getchar()) != '\n' && c != EOF);
-    }
-#endif
-#endif
+    #ifdef _WIN32
+        HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+        if (h != INVALID_HANDLE_VALUE) FlushConsoleInputBuffer(h);
+    #else
+    #if defined(TCIFLUSH)
+        tcflush(STDIN_FILENO, TCIFLUSH);
+    #else
+        fd_set rfds;
+        struct timeval tv;
+        int c;
+        while (1) {
+            FD_ZERO(&rfds);
+            FD_SET(STDIN_FILENO, &rfds);
+            tv.tv_sec = 0;
+            tv.tv_usec = 0;
+            int r = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
+            if (r <= 0) break;
+            while ((c = getchar()) != '\n' && c != EOF);
+        }
+    #endif
+    #endif
 }
