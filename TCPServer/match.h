@@ -192,10 +192,11 @@ void logMatch(Match *m){
     }
     
     if (i < BOARD_SIZE*BOARD_SIZE){
+        char c;
         switch (m->moves[i].state)
         {
             case WIN:
-                char c = (m->moves[i].isO)? 'O' : 'X';
+                 c = (m->moves[i].isO)? 'O' : 'X';
                 fprintf(f, "%c %d %d\n%c WIN", c, m->moves[i].x, m->moves[i].y, c);
                 break;
             case DRAW:

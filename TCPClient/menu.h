@@ -85,7 +85,11 @@ int lastResponse = -1;
 const char* responseCode[2] = {"+OK", "-ERR"};
 const char* commandPrefix[6] = {"LOGIN ","LOGOUT", "REGISTER ","GET_READY_LIST","CHALLENGE ","CHALLENGE_RESP "};
 char buffer[BUFF_SIZE];
+void flush_stdin(void);
 
+/* forward declarations to avoid implicit-declaration warnings */
+void dispatch_message(char* msg, int sock);
+void playerMove(int socketFd);
 
 
 int sendMessage(int socketFd, const char *input, int type) {

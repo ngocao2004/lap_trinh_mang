@@ -1,0 +1,3 @@
+2025-12-31_16-06-28 tuan(X) vs cao(O)
+X 4 4
+O SURRENDERED

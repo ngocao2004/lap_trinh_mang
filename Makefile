@@ -9,7 +9,7 @@ SERVER_BIN = server
 all: $(CLIENT_BIN) $(SERVER_BIN)
 
 $(CLIENT_BIN): $(CLIENT_SRC)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ -pthread
 
 $(SERVER_BIN): $(SERVER_SRC)
 	$(CC) $(CFLAGS) -o $@ $^ -pthread
